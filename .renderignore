@@ -1,0 +1,54 @@
+# Render.com - Files to ignore during deployment
+
+# Local development
+.env
+.env.local
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs (if you don't want them deployed)
+logs/
+*.log
+
+# Local data (if any)
+*.db
+*.sqlite
+*.sqlite3
+
+# Git
+.git/
+.gitignore
+
+# Documentation (optional - remove if you want docs deployed)
+# *.md
+# !README.md
+
+# Testing
+tests/
+*.test.py
+.pytest_cache/
+
+# Backup files
+*.bak
+backup/
+Backup.py

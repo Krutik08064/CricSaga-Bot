@@ -1,0 +1,46 @@
+services:
+  # PostgreSQL Database
+  - type: pserv
+    name: cricsaga-db
+    env: docker
+    plan: free
+    ipAllowList: []
+
+  # Bot Web Service
+  - type: web
+    name: cricsaga-bot
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bb.py
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: BOT_ADMIN
+        sync: false
+      - key: DB_NAME
+        fromDatabase:
+          name: cricsaga-db
+          property: database
+      - key: DB_USER
+        fromDatabase:
+          name: cricsaga-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: cricsaga-db
+          property: password
+      - key: DB_HOST
+        fromDatabase:
+          name: cricsaga-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: cricsaga-db
+          property: port
+
+databases:
+  - name: cricsaga-db
+    databaseName: cricsaga
+    user: cricsaga_user
+    plan: free
