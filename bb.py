@@ -9051,6 +9051,26 @@ def main():
         # Start background cleanup task
         asyncio.create_task(cleanup_old_games())
         logger.info("🧹 Background cleanup task started")
+        
+        # Start web server if on Render
+        PORT = os.environ.get("PORT")
+        if PORT:
+            from web import web_server, keep_alive
+            from aiohttp import web as aio_web
+            
+            logger.info("🌐 Starting web server for Render.com deployment...")
+            
+            # Start keep-alive task
+            asyncio.create_task(keep_alive())
+            
+            # Run web server in background
+            app = web_server()
+            runner = aio_web.AppRunner(app)
+            await runner.setup()
+            site = aio_web.TCPSite(runner, '0.0.0.0', int(PORT))
+            await site.start()
+            logger.info(f"✅ Web server started on port {PORT}")
+            logger.info("✅ Keep-alive system activated")
     
     application.post_init = post_init
     
@@ -9092,30 +9112,5 @@ def main():
         logger.info("👋 Bot shutdown complete")
 
 if __name__ == "__main__":
-    import os
-    PORT = os.environ.get("PORT")
-    
-    if PORT:
-        # Running on Render.com - start web server for keep-alive
-        import threading
-        from web import web_server, keep_alive
-        from aiohttp import web as aio_web
-        
-        logger.info("🌐 Starting web server for Render.com deployment...")
-        
-        # Start web server in a separate thread
-        def start_web_server():
-            app = web_server()
-            aio_web.run_app(app, host="0.0.0.0", port=int(PORT))
-        
-        web_thread = threading.Thread(target=start_web_server, daemon=True)
-        web_thread.start()
-        logger.info(f"✅ Web server started on port {PORT}")
-        
-        # Start keep-alive task
-        import asyncio
-        asyncio.create_task(keep_alive())
-        logger.info("✅ Keep-alive system activated")
-    
     main()
 
