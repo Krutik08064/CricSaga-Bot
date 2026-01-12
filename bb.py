@@ -4311,7 +4311,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"{MATCH_SEPARATOR}\n\n"
                 f"✨ Hey {escape_markdown_v2_custom(user.first_name)}\\!\n\n"
                 f"*Cricket Saga* is an interactive multiplayer cricket game for Telegram\\.\n"
-                f"Play quick matches, compete in ranked games, and track your stats \\— all inside your chats\\.\n\n"
+                f"Play quick matches, compete in ranked games, and track your stats all inside your chats\\.\n\n"
                 f"🎮 *WHAT YOU CAN DO:*\n"
                 f"• Play 1v1 or team matches\n"
                 f"• Compete in ranked mode\n"
@@ -6606,10 +6606,150 @@ async def career(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @check_blacklist()
 async def rankedinfo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Explain ranked system and anti-cheat to users"""
+    """Explain ranked system and anti-cheat to users with pagination"""
     try:
-        info_text = (
-            f"🏆 *RANKED SYSTEM \\- COMPLETE GUIDE*\n"
+        # Define all pages
+        pages = [
+            # Page 1: How Ranked Works
+            (
+                f"🏆 *RANKED SYSTEM \\- GUIDE* \\(1/4\\)\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"*📋 HOW RANKED WORKS \\(A to Z\\)*\n\n"
+                f"1️⃣ *Start Playing*\n"
+                f"   • Type `/ranked` to join queue\n"
+                f"   • Bot finds opponent near your rating\n"
+                f"   • Play cricket match\\!\n\n"
+                f"2️⃣ *Win or Lose*\n"
+                f"   • Win \\= Rating goes UP ⬆️\n"
+                f"   • Lose \\= Rating goes DOWN ⬇️\n"
+                f"   • More matches \\= Unlock full rewards\n\n"
+                f"3️⃣ *Climb Ranks*\n"
+                f"   • Everyone starts at Bronze III \\(1000\\)\n"
+                f"   • Keep winning to reach Legend \\(3000\\+\\)\n"
+                f"   • Check `/ranks` for all tiers\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"*🎯 TRUST SCORE EXPLAINED*\n\n"
+                f"*What is it?*\n"
+                f"A fairness score \\(0\\-100\\) that protects \n"
+                f"against cheating and keeps matches fair\\.\n\n"
+                f"*Trust Levels:*\n"
+                f"🟢 *70\\-100* \\→ Perfect\\! Full rewards\n"
+                f"🟡 *40\\-69* \\→ Good, play normally\n"
+                f"🟠 *20\\-39* \\→ Low, only 50% rewards\n"
+                f"🔴 *0\\-19* \\→ Very low, rating suspended"
+            ),
+            # Page 2: Trust Score Details
+            (
+                f"🏆 *RANKED SYSTEM \\- GUIDE* \\(2/4\\)\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"*🎯 KEEPING TRUST SCORE HIGH*\n\n"
+                f"*How to KEEP trust high:*\n"
+                f"✅ Play with different opponents\n"
+                f"✅ Play naturally \\(win/lose naturally\\)\n"
+                f"✅ Don't play same person repeatedly\n"
+                f"✅ Be consistent and fair\n\n"
+                f"*What LOWERS trust:*\n"
+                f"❌ Playing same opponent 5\\+ times per day\n"
+                f"❌ Suspicious patterns \\(taking turns winning\\)\n"
+                f"❌ Trying to boost rating unfairly\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"*🆕 NEW PLAYERS*\n\n"
+                f"*Why reduced rewards at start?*\n"
+                f"To stop people from making fake accounts\n"
+                f"and cheating the system\\.\n\n"
+                f"*Rating gain unlocks gradually:*\n"
+                f"• First 5 matches \\→ 30% rating gain\n"
+                f"• Matches 6\\-10 \\→ 50% rating gain\n"
+                f"• Matches 11\\-20 \\→ 75% rating gain\n"
+                f"• After 20 matches \\→ 100% \\(full rewards\\)\n\n"
+                f"_Just play 20 matches and you're fully unlocked\\!_"
+            ),
+            # Page 3: Getting Flagged & Recovery
+            (
+                f"🏆 *RANKED SYSTEM \\- GUIDE* \\(3/4\\)\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"*⚠️ WHAT IF I GET FLAGGED?*\n\n"
+                f"*Why does flagging happen?*\n"
+                f"Bot auto\\-detects suspicious activity to\n"
+                f"protect fair players\\.\n\n"
+                f"*Common triggers:*\n"
+                f"• Playing 5\\+ matches vs same person/day\n"
+                f"• Win\\-trading patterns detected\n"
+                f"• Account too new \\(under 7 days old\\)\n\n"
+                f"*What happens?*\n"
+                f"• Your trust score drops\n"
+                f"• You get less rating points\n"
+                f"• Admins review your matches\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"*🔧 HOW TO FIX LOW TRUST*\n\n"
+                f"*Step 1:* Stop playing same opponent\n"
+                f"*Step 2:* Play with different people\n"
+                f"*Step 3:* Keep playing fair matches\n"
+                f"*Step 4:* Trust score slowly recovers\n\n"
+                f"*Time needed:*\n"
+                f"Usually takes 10\\-20 fair matches to\n"
+                f"fully recover trust score\\."
+            ),
+            # Page 4: Challenge Mode & Commands
+            (
+                f"🏆 *RANKED SYSTEM \\- GUIDE* \\(4/4\\)\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"*🎮 CHALLENGE MODE \\- PLAY FRIENDS*\n\n"
+                f"Want to play a specific person instead\n"
+                f"of random matchmaking?\n\n"
+                f"*How to challenge:*\n"
+                f"1\\. Find any message from the player\n"
+                f"2\\. Reply to their message\n"
+                f"3\\. Type `/challenge`\n"
+                f"4\\. Match starts immediately\\!\n\n"
+                f"*Challenge rules:*\n"
+                f"✅ Counts as ranked match\n"
+                f"✅ Affects rating \\& trust score\n"
+                f"✅ Same anti\\-cheat protection\n"
+                f"✅ Must be within ±2 rank tiers\n"
+                f"⚠️ Don't spam same person \\(5\\+ times/day\\)\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"*💡 GOLDEN RULES*\n"
+                f"1\\. Play with VARIETY of opponents\n"
+                f"2\\. Don't spam same person repeatedly\n"
+                f"3\\. Play naturally and fairly\n"
+                f"4\\. Check `/career` to see your trust score\n"
+                f"5\\. Have fun and climb ranks\\!\n\n"
+                f"_System is fair\\. Play fair\\. Have fun\\!_ 🎯"
+            )
+        ]
+        
+        # Create navigation buttons for first page
+        keyboard = [[
+            InlineKeyboardButton("Next ▶️", callback_data="rankedinfo_page_1")
+        ]]
+        
+        await update.message.reply_text(
+            pages[0],
+            parse_mode=ParseMode.MARKDOWN_V2,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in rankedinfo: {e}")
+        await update.message.reply_text(
+            "❌ Error showing ranked info\\. Use /help for commands\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+
+async def handle_rankedinfo_pagination(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle pagination for rankedinfo command"""
+    query = update.callback_query
+    await query.answer()
+    
+    # Extract page number from callback data
+    page = int(query.data.split("_")[-1])
+    
+    # Define all pages (same as in rankedinfo)
+    pages = [
+        # Page 1: How Ranked Works
+        (
+            f"🏆 *RANKED SYSTEM \\- GUIDE* \\(1/4\\)\n"
             f"━━━━━━━━━━━━━━━━━━━━\n\n"
             f"*📋 HOW RANKED WORKS \\(A to Z\\)*\n\n"
             f"1️⃣ *Start Playing*\n"
@@ -6617,9 +6757,9 @@ async def rankedinfo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"   • Bot finds opponent near your rating\n"
             f"   • Play cricket match\\!\n\n"
             f"2️⃣ *Win or Lose*\n"
-            f"   • Win = Rating goes UP ⬆️\n"
-            f"   • Lose = Rating goes DOWN ⬇️\n"
-            f"   • More matches = Unlock full rewards\n\n"
+            f"   • Win \\= Rating goes UP ⬆️\n"
+            f"   • Lose \\= Rating goes DOWN ⬇️\n"
+            f"   • More matches \\= Unlock full rewards\n\n"
             f"3️⃣ *Climb Ranks*\n"
             f"   • Everyone starts at Bronze III \\(1000\\)\n"
             f"   • Keep winning to reach Legend \\(3000\\+\\)\n"
@@ -6630,13 +6770,19 @@ async def rankedinfo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"A fairness score \\(0\\-100\\) that protects \n"
             f"against cheating and keeps matches fair\\.\n\n"
             f"*Trust Levels:*\n"
-            f"🟢 *70\\-100* → Perfect\\! Full rewards\n"
-            f"🟡 *40\\-69* → Good, play normally\n"
-            f"🟠 *20\\-39* → Low, only 50% rewards\n"
-            f"🔴 *0\\-19* → Very low, rating suspended\n\n"
+            f"🟢 *70\\-100* \\→ Perfect\\! Full rewards\n"
+            f"🟡 *40\\-69* \\→ Good, play normally\n"
+            f"🟠 *20\\-39* \\→ Low, only 50% rewards\n"
+            f"🔴 *0\\-19* \\→ Very low, rating suspended"
+        ),
+        # Page 2: Trust Score Details
+        (
+            f"🏆 *RANKED SYSTEM \\- GUIDE* \\(2/4\\)\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"*🎯 KEEPING TRUST SCORE HIGH*\n\n"
             f"*How to KEEP trust high:*\n"
             f"✅ Play with different opponents\n"
-            f"✅ Play naturally \\(sometimes win, sometimes lose\\)\n"
+            f"✅ Play naturally \\(win/lose naturally\\)\n"
             f"✅ Don't play same person repeatedly\n"
             f"✅ Be consistent and fair\n\n"
             f"*What LOWERS trust:*\n"
@@ -6649,11 +6795,15 @@ async def rankedinfo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"To stop people from making fake accounts\n"
             f"and cheating the system\\.\n\n"
             f"*Rating gain unlocks gradually:*\n"
-            f"• First 5 matches → 30% rating gain\n"
-            f"• Matches 6\\-10 → 50% rating gain\n"
-            f"• Matches 11\\-20 → 75% rating gain\n"
-            f"• After 20 matches → 100% \\(full rewards\\)\n\n"
-            f"_Just play 20 matches and you're fully unlocked\\!_\n\n"
+            f"• First 5 matches \\→ 30% rating gain\n"
+            f"• Matches 6\\-10 \\→ 50% rating gain\n"
+            f"• Matches 11\\-20 \\→ 75% rating gain\n"
+            f"• After 20 matches \\→ 100% \\(full rewards\\)\n\n"
+            f"_Just play 20 matches and you're fully unlocked\\!_"
+        ),
+        # Page 3: Getting Flagged & Recovery
+        (
+            f"🏆 *RANKED SYSTEM \\- GUIDE* \\(3/4\\)\n"
             f"━━━━━━━━━━━━━━━━━━━━\n\n"
             f"*⚠️ WHAT IF I GET FLAGGED?*\n\n"
             f"*Why does flagging happen?*\n"
@@ -6667,13 +6817,6 @@ async def rankedinfo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Your trust score drops\n"
             f"• You get less rating points\n"
             f"• Admins review your matches\n\n"
-            f"*If it's a MISTAKE:*\n"
-            f"• Admins can clear the flag\n"
-            f"• Your trust score gets restored\n"
-            f"• Everything goes back to normal\n\n"
-            f"*If you were REALLY cheating:*\n"
-            f"• Rating changes get suspended\n"
-            f"• You can still play but no rating change\n\n"
             f"━━━━━━━━━━━━━━━━━━━━\n\n"
             f"*🔧 HOW TO FIX LOW TRUST*\n\n"
             f"*Step 1:* Stop playing same opponent\n"
@@ -6682,44 +6825,54 @@ async def rankedinfo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"*Step 4:* Trust score slowly recovers\n\n"
             f"*Time needed:*\n"
             f"Usually takes 10\\-20 fair matches to\n"
-            f"fully recover trust score\\.\n\n"
-            f"*Pro tip:* Use `/challenge` with different\n"
-            f"opponents or join `/ranked` queue\\.\n\n"
+            f"fully recover trust score\\."
+        ),
+        # Page 4: Challenge Mode & Commands
+        (
+            f"🏆 *RANKED SYSTEM \\- GUIDE* \\(4/4\\)\n"
             f"━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"*🎮 CHALLENGE MODE*\n\n"
-            f"Want to play specific person?\n"
-            f"• Reply to their message with `/challenge`\n"
-            f"• Same trust system applies\n"
-            f"• Same anti\\-cheat protection\n"
-            f"• Must be within ±2 rank tiers\n\n"
+            f"*🎮 CHALLENGE MODE \\- PLAY FRIENDS*\n\n"
+            f"Want to play a specific person instead\n"
+            f"of random matchmaking?\n\n"
+            f"*How to challenge:*\n"
+            f"1\\. Find any message from the player\n"
+            f"2\\. Reply to their message\n"
+            f"3\\. Type `/challenge`\n"
+            f"4\\. Match starts immediately\\!\n\n"
+            f"*Challenge rules:*\n"
+            f"✅ Counts as ranked match\n"
+            f"✅ Affects rating \\& trust score\n"
+            f"✅ Same anti\\-cheat protection\n"
+            f"✅ Must be within ±2 rank tiers\n"
+            f"⚠️ Don't spam same person \\(5\\+ times/day\\)\n\n"
             f"━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"*💡 GOLDEN RULES*\n\n"
+            f"*💡 GOLDEN RULES*\n"
             f"1\\. Play with VARIETY of opponents\n"
             f"2\\. Don't spam same person repeatedly\n"
             f"3\\. Play naturally and fairly\n"
             f"4\\. Check `/career` to see your trust score\n"
             f"5\\. Have fun and climb ranks\\!\n\n"
-            f"*📱 Useful Commands:*\n"
-            f"`/ranked` → Find match\n"
-            f"`/challenge` → Challenge player\n"
-            f"`/career` → View stats \\+ trust score\n"
-            f"`/leaderboard` → Top players\n"
-            f"`/ranks` → All rank tiers\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n\n"
             f"_System is fair\\. Play fair\\. Have fun\\!_ 🎯"
         )
-        
-        await update.message.reply_text(
-            info_text,
-            parse_mode=ParseMode.MARKDOWN_V2
+    ]
+    
+    # Create navigation buttons based on current page
+    buttons = []
+    if page > 0:
+        buttons.append(InlineKeyboardButton("◀️ Previous", callback_data=f"rankedinfo_page_{page-1}"))
+    if page < len(pages) - 1:
+        buttons.append(InlineKeyboardButton("Next ▶️", callback_data=f"rankedinfo_page_{page+1}"))
+    
+    keyboard = [buttons] if buttons else None
+    
+    try:
+        await query.edit_message_text(
+            pages[page],
+            parse_mode=ParseMode.MARKDOWN_V2,
+            reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None
         )
-        
     except Exception as e:
-        logger.error(f"Error in rankedinfo: {e}")
-        await update.message.reply_text(
-            "❌ Error showing ranked info\\. Use /help for commands\\.",
-            parse_mode=ParseMode.MARKDOWN_V2
-        )
+        logger.error(f"Error in rankedinfo pagination: {e}")
 
 # ===== PHASE 4: SOCIAL FEATURES =====
 
@@ -8988,6 +9141,9 @@ def main():
     application.add_handler(CallbackQueryHandler(delete_match, pattern="^delete_"))
     application.add_handler(CallbackQueryHandler(back_to_list, pattern="^list_matches"))
     application.add_handler(CallbackQueryHandler(handle_pagination, pattern="^page\\_"))
+    
+    # Rankedinfo pagination callback
+    application.add_handler(CallbackQueryHandler(handle_rankedinfo_pagination, pattern="^rankedinfo_page_"))
     
     # Subscription verification callback
     application.add_handler(CallbackQueryHandler(verify_subscription, pattern="^verify_subscription$"))
