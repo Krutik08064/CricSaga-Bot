@@ -7,7 +7,6 @@ import asyncio
 import time
 import re
 import html
-import asyncpg
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, Set, List, DefaultDict, Optional, Union
