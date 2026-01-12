@@ -5,7 +5,7 @@ Pings itself every 3 minutes to prevent inactivity shutdown
 
 # TODO: After deploying to Render, update this URL with your actual Render URL
 # Example: WEB_URL = "https://your-bot-name.onrender.com/"
-WEB_URL = "https://your-bot-name.onrender.com/"  # Update this after deployment
+WEB_URL = "https://cricsaga-bot.onrender.com"  # Update this after deployment
 
 WEB_SLEEP = 3 * 60  # Ping every 3 minutes
 
