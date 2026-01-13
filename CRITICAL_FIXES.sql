@@ -12,39 +12,32 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS registration_date TIMESTAMP DEFAULT C
 -- Update existing rows to copy registered_at to registration_date
 UPDATE users SET registration_date = registered_at WHERE registration_date IS NULL;
 
--- FIX 2: Kill idle connections to free up pool
--- Only kills current user's connections (no superuser needed)
-SELECT pg_terminate_backend(pid)
-FROM pg_stat_activity
-WHERE datname = current_database()
-  AND state = 'idle'
-  AND usename = current_user
-  AND pid <> pg_backend_pid();
+-- FIX 2: Skip killing connections (can hang - do this manually if needed)
+-- To kill connections manually, run this separately:
+-- SELECT pg_terminate_backend(pid) FROM pg_stat_activity 
+-- WHERE datname = current_database() AND state = 'idle' AND usename = current_user AND pid <> pg_backend_pid();
 
--- FIX 3: Remove double-counting trigger
--- This fixes: matches being counted twice
-DROP TRIGGER IF EXISTS trigger_update_player_stats ON match_history;
+-- FIX 3: Remove double-counting trigger (if exists)
+DROP TRIGGER IF EXISTS trigger_update_player_stats ON match_history_detailed;
+DROP TRIGGER IF EXISTS trigger_update_player_stats ON ranked_matches;
 
--- FIX 4: Correct match counts (divide by 2 to fix double-counting)
+-- FIX 4: Correct match counts - SIMPLIFIED (skip if taking too long)
+-- If this hangs, comment it out and run later
+-- UPDATE player_stats SET matches_played = 0 WHERE matches_played > 100;
+
+-- FIX 5: Sync player_stats with career_stats (only where both exist)
 UPDATE player_stats ps
-SET matches_played = (
-    SELECT COUNT(*) FROM match_history mh
-    WHERE (mh.player1_id = ps.player_id OR mh.player2_id = ps.player_id)
-) / 2;
-
--- FIX 5: Sync player_stats with career_stats
-UPDATE player_stats ps
-SET matches_played = cs.total_matches
+SET matches_played = COALESCE(cs.total_matches, 0)
 FROM career_stats cs
-WHERE ps.player_id = cs.player_id;
+WHERE ps.user_id = cs.user_id;
 
 -- FIX 6: Ensure player_stats entries exist for all users
 -- This fixes: foreign key constraint violation
-INSERT INTO player_stats (player_id, user_id, matches_played, matches_won)
-SELECT telegram_id, telegram_id, 0, 0
+INSERT INTO player_stats (user_id, matches_played, matches_won)
+SELECT telegram_id, 0, 0
 FROM users
 WHERE telegram_id NOT IN (SELECT user_id FROM player_stats)
-ON CONFLICT (player_id) DO NOTHING;
+ON CONFLICT (user_id) DO NOTHING;
 
 -- FIX 7: Ensure career_stats entries exist for all users
 INSERT INTO career_stats (user_id, rating, rank_tier, total_matches, wins, losses)

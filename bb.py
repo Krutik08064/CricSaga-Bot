@@ -500,13 +500,7 @@ def get_db_connection():
         if not init_db_pool():
             return None
     try:
-        # Check if pool is exhausted
-        if hasattr(db_pool, '_pool'):
-            available = len([c for c in db_pool._pool if c])
-            if available == 0:
-                logger.warning("⚠️ Connection pool exhausted, waiting...")
-        
-        # Get connection
+        # Get connection from pool
         conn = db_pool.getconn()
         
         # Test if connection is alive
@@ -3447,18 +3441,20 @@ async def handle_game_end(query, game: dict, current_score: int, is_chase_succes
         # PHASE 2: Update ELO ratings for ranked matches
         if game.get('ranked_match', False) or game.get('is_ranked', False):
             try:
-                player1_id = game['creator']
-                player2_id = game['joiner']
+                player1_id = game['creator']  # First batsman (bowler)
+                player2_id = game['joiner']  # Second batsman (chaser)
                 player1_rating = game.get('player1_rating') or game.get('p1_rating', 1000)
                 player2_rating = game.get('player2_rating') or game.get('p2_rating', 1000)
                 
-                # Determine winner (1 = creator/bowler wins, 2 = joiner/batsman wins, 0 = draw)
+                # Determine winner
+                # Player1 (creator/bowler) wins if chase fails
+                # Player2 (joiner/batsman) wins if chase succeeds
                 if runs_short == 0:
                     winner = 0  # Draw
                 elif is_chase_successful:
-                    winner = 2
+                    winner = 2  # Player2 (joiner/chaser) wins
                 else:
-                    winner = 1
+                    winner = 1  # Player1 (creator/bowler) wins
                 
                 # Calculate ELO changes
                 rating_change_p1, rating_change_p2 = calculate_elo_change(
@@ -3618,7 +3614,9 @@ async def handle_game_end(query, game: dict, current_score: int, is_chase_succes
                     except Exception as db_error:
                         logger.error(f"Database update error: {db_error}", exc_info=True)
                     finally:
-                        return_db_connection(conn)
+                        if conn:
+                            return_db_connection(conn)
+                            conn = None
                 
                 # Send rating changes as separate message AFTER database commit
                 try:
