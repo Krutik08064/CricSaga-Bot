@@ -507,17 +507,28 @@ def get_db_connection():
         try:
             with conn.cursor() as cursor:
                 cursor.execute('SELECT 1')
-        except Exception:
+        except Exception as e:
             # Connection is dead, close it and get a new one
-            logger.warning("Dead connection detected, getting new one")
+            logger.warning(f"Dead connection detected ({e}), getting new one")
             try:
                 conn.close()
             except:
                 pass
-            db_pool.putconn(conn)
+            # Put back bad connection so pool can create new one
+            db_pool.putconn(conn, close=True)
+            # Get fresh connection
             conn = db_pool.getconn()
-            with conn.cursor() as cursor:
-                cursor.execute('SELECT 1')
+            # Test new connection
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute('SELECT 1')
+            except Exception as e2:
+                logger.error(f"New connection also failed: {e2}")
+                # Reinitialize entire pool
+                db_pool.closeall()
+                if not init_db_pool():
+                    return None
+                conn = db_pool.getconn()
         
         return conn
     except Exception as e:
@@ -1128,7 +1139,11 @@ async def check_telegram_account_age(user) -> tuple[bool, int]:
                 """, (user_id,))
                 result = cur.fetchone()
                 if result and result[0]:
-                    account_age = (datetime.now(timezone.utc) - result[0]).days
+                    # Ensure timezone-aware comparison
+                    registered = result[0]
+                    if registered.tzinfo is None:
+                        registered = registered.replace(tzinfo=timezone.utc)
+                    account_age = (datetime.now(timezone.utc) - registered).days
                     return account_age >= MIN_TELEGRAM_ACCOUNT_AGE_DAYS, account_age
         
         # Default: allow but log
