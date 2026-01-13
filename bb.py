@@ -276,24 +276,26 @@ DB_CONFIG = {
     'dbname': os.getenv('DB_NAME', 'postgres'),
     'user': os.getenv('DB_USER'),
     'password': os.getenv('DB_PASSWORD'),
-    'host': os.getenv('DB_HOST', 'localhost'),  # Make sure this is correct
+    'host': os.getenv('DB_HOST', 'localhost'),
     'port': int(os.getenv('DB_PORT', '5432')),
-    'connect_timeout': 30,  # Increased timeout
-    'sslmode': 'require',  # Required for most cloud hosting
+    'connect_timeout': 10,  # 10 second connection timeout
+    'sslmode': 'require',
     'keepalives': 1,
     'keepalives_idle': 30,
     'keepalives_interval': 10,
     'keepalives_count': 5,
     'client_encoding': 'utf8',
-    'application_name': 'cricket_bot',  # Add application name
-    'options': '-c timezone=UTC'  # Set timezone
+    'application_name': 'cricket_bot',
+    'options': '-c statement_timeout=30000'  # 30 second query timeout
 }
 
 # Add near the top with other constants
-# Reduced for Supabase Session Mode connection limits
-DB_POOL_MIN = 1
-DB_POOL_MAX = 5  # Slightly higher to allow some concurrency
+# Optimized for Supabase Transaction Mode
+DB_POOL_MIN = 2
+DB_POOL_MAX = 10  # Higher limit safe with Transaction Mode
+CONNECTION_MAX_AGE = 300  # Recycle connections after 5 minutes
 db_pool = None
+last_pool_check = 0
 
 # Add this after DB_CONFIG
 DB_SCHEMA_VERSION = 2  # For tracking database updates
@@ -395,6 +397,29 @@ def truncate_text(text: str, max_length: int = 30, suffix: str = "...") -> str:
     if len(text) <= max_length:
         return text
     return text[:max_length - len(suffix)] + suffix
+
+async def check_connection_health():
+    """Periodic health check for database connections"""
+    global db, last_pool_check
+    
+    while True:
+        try:
+            await asyncio.sleep(60)  # Check every minute
+            now = time.time()
+            
+            # Validate db connection
+            if db and not db.check_connection():
+                logger.warning("⚠️ Database connection lost, attempting reconnection...")
+                db._init_pool()
+            
+            # Log pool stats every 5 minutes
+            if now - last_pool_check > 300:
+                last_pool_check = now
+                if db and db.pool:
+                    logger.info(f"📊 Connection pool health check passed")
+                    
+        except Exception as e:
+            logger.error(f"Error in connection health check: {e}")
 
 async def cleanup_old_games():
     """Periodic cleanup of stale games to prevent memory leaks"""
@@ -9230,6 +9255,10 @@ def main():
         # Start background cleanup task
         asyncio.create_task(cleanup_old_games())
         logger.info("🧹 Background cleanup task started")
+        
+        # Start connection health monitoring
+        asyncio.create_task(check_connection_health())
+        logger.info("❤️ Connection health monitoring started")
         
         # Start web server if on Render
         PORT = os.environ.get("PORT")
