@@ -3584,14 +3584,6 @@ async def handle_game_end(query, game: dict, current_score: int, is_chase_succes
                                 WHERE user_id = %s
                             """, (rating_change_p1, new_rank_p1, game['creator_name'], 1 if winner == 1 else 0, 1 if winner == 2 else 0, player1_id))
                             
-                            # Sync player_stats for player 1
-                            cur.execute("""
-                                UPDATE player_stats
-                                SET matches_played = matches_played + 1,
-                                    matches_won = matches_won + %s
-                                WHERE user_id = %s
-                            """, (1 if winner == 1 else 0, player1_id))
-                            
                             # Update player 2 rating
                             new_rating_p2 = player2_rating + rating_change_p2
                             new_rank_p2 = get_rank_from_rating(new_rating_p2)
@@ -3606,14 +3598,6 @@ async def handle_game_end(query, game: dict, current_score: int, is_chase_succes
                                     updated_at = CURRENT_TIMESTAMP
                                 WHERE user_id = %s
                             """, (rating_change_p2, new_rank_p2, game['joiner_name'], 1 if winner == 2 else 0, 1 if winner == 1 else 0, player2_id))
-                            
-                            # Sync player_stats for player 2
-                            cur.execute("""
-                                UPDATE player_stats
-                                SET matches_played = matches_played + 1,
-                                    matches_won = matches_won + %s
-                                WHERE user_id = %s
-                            """, (1 if winner == 2 else 0, player2_id))
                             
                             # Save to ranked_matches table
                             cur.execute("""

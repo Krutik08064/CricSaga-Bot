@@ -6,7 +6,7 @@
 -- ============================================
 
 -- Reset career_stats to default
-UPDATE career_stats
+UPDATE career_stats cs
 SET rating = 1000,
     rank_tier = 'Unranked',
     total_matches = 0,
@@ -17,7 +17,8 @@ SET rating = 1000,
     highest_rating = 1000,
     trust_score = 50,
     rating_suspended = FALSE,
-    account_flagged = FALSE;
+    account_flagged = FALSE,
+    username = (SELECT first_name FROM users WHERE telegram_id = cs.user_id);
 
 -- Reset player_stats to default
 UPDATE player_stats
