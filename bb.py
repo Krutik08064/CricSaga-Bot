@@ -3552,9 +3552,17 @@ async def handle_game_end(query, game: dict, current_score: int, is_chase_succes
                 
                 # ========== END ANTI-CHEAT PROCESSING ==========
                 
-                # Update ratings in database
+                # Use final adjusted changes
                 rating_change_p1 = final_change_p1
                 rating_change_p2 = final_change_p2
+                
+                # Map final changes back to batting order for display
+                if first_batsman_id == player1_id:
+                    final_change_first = final_change_p1
+                    final_change_second = final_change_p2
+                else:
+                    final_change_first = final_change_p2
+                    final_change_second = final_change_p1
                 
                 # Update ratings in database
                 conn = get_db_connection()
@@ -3568,11 +3576,13 @@ async def handle_game_end(query, game: dict, current_score: int, is_chase_succes
                                 UPDATE career_stats 
                                 SET rating = rating + %s,
                                     rank_tier = %s,
+                                    username = %s,
                                     total_matches = total_matches + 1,
                                     wins = wins + %s,
-                                    losses = losses + %s
+                                    losses = losses + %s,
+                                    updated_at = CURRENT_TIMESTAMP
                                 WHERE user_id = %s
-                            """, (rating_change_p1, new_rank_p1, 1 if winner == 1 else 0, 1 if winner == 2 else 0, player1_id))
+                            """, (rating_change_p1, new_rank_p1, game['creator_name'], 1 if winner == 1 else 0, 1 if winner == 2 else 0, player1_id))
                             
                             # Sync player_stats for player 1
                             cur.execute("""
@@ -3589,11 +3599,13 @@ async def handle_game_end(query, game: dict, current_score: int, is_chase_succes
                                 UPDATE career_stats 
                                 SET rating = rating + %s,
                                     rank_tier = %s,
+                                    username = %s,
                                     total_matches = total_matches + 1,
                                     wins = wins + %s,
-                                    losses = losses + %s
+                                    losses = losses + %s,
+                                    updated_at = CURRENT_TIMESTAMP
                                 WHERE user_id = %s
-                            """, (rating_change_p2, new_rank_p2, 1 if winner == 2 else 0, 1 if winner == 1 else 0, player2_id))
+                            """, (rating_change_p2, new_rank_p2, game['joiner_name'], 1 if winner == 2 else 0, 1 if winner == 1 else 0, player2_id))
                             
                             # Sync player_stats for player 2
                             cur.execute("""
@@ -3651,15 +3663,15 @@ async def handle_game_end(query, game: dict, current_score: int, is_chase_succes
                     loser_name = first_batsman_name if is_chase_successful else second_batsman_name
                     loser_id = first_batsman_id if is_chase_successful else second_batsman_id
                     
-                    # Get rating changes for winner and loser
+                    # Get FINAL ADJUSTED rating changes for winner and loser
                     if winner_id == first_batsman_id:
-                        winner_change = rating_change_first
-                        loser_change = rating_change_second
+                        winner_change = final_change_first
+                        loser_change = final_change_second
                         winner_old = first_batsman_rating
                         loser_old = second_batsman_rating
                     else:
-                        winner_change = rating_change_second
-                        loser_change = rating_change_first
+                        winner_change = final_change_second
+                        loser_change = final_change_first
                         winner_old = second_batsman_rating
                         loser_old = first_batsman_rating
                     
