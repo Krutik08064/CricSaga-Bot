@@ -291,8 +291,8 @@ DB_CONFIG = {
 
 # Add near the top with other constants
 # Optimized for Supabase Transaction Mode
-DB_POOL_MIN = 5
-DB_POOL_MAX = 20  # Transaction Mode supports 1000+ connections
+DB_POOL_MIN = 10
+DB_POOL_MAX = 30  # Transaction Mode supports 1000+ connections
 CONNECTION_MAX_AGE = 300  # Recycle connections after 5 minutes
 db_pool = None
 last_pool_check = 0
@@ -3688,21 +3688,24 @@ async def handle_game_end(query, game: dict, current_score: int, is_chase_succes
                     logger.info("✅ Rating message sent successfully!")
                     
                     # PHASE 4: Check for rank-up celebrations
-                    old_rank_p1 = get_rank_from_rating(player1_rating)
-                    old_rank_p2 = get_rank_from_rating(player2_rating)
+                    # Recalculate ranks from new ratings (already have winner_new, loser_new)
+                    old_rank_winner = get_rank_from_rating(winner_old)
+                    new_rank_winner = get_rank_from_rating(winner_new)
+                    old_rank_loser = get_rank_from_rating(loser_old)
+                    new_rank_loser = get_rank_from_rating(loser_new)
                     
                     # Extract tier name (e.g., "Silver" from "Silver II")
                     def get_tier_name(rank_str):
                         return rank_str.split()[0] if rank_str else ""
                     
-                    old_tier_p1 = get_tier_name(old_rank_p1)
-                    new_tier_p1 = get_tier_name(new_rank_p1)
-                    old_tier_p2 = get_tier_name(old_rank_p2)
-                    new_tier_p2 = get_tier_name(new_rank_p2)
+                    old_tier_winner = get_tier_name(old_rank_winner)
+                    new_tier_winner = get_tier_name(new_rank_winner)
+                    old_tier_loser = get_tier_name(old_rank_loser)
+                    new_tier_loser = get_tier_name(new_rank_loser)
                     
-                    # Send rank-up celebration for player 1
-                    if old_tier_p1 != new_tier_p1 and new_tier_p1:
-                        celebration = get_rank_up_message(new_tier_p1, game["creator_name"], player1_id, new_rating_p1)
+                    # Send rank-up celebration for winner
+                    if old_tier_winner != new_tier_winner and new_tier_winner:
+                        celebration = get_rank_up_message(new_tier_winner, winner_name, winner_id, winner_new)
                         if celebration:
                             await asyncio.sleep(1)  # Small delay after rating message
                             await context.bot.send_message(
@@ -3711,9 +3714,9 @@ async def handle_game_end(query, game: dict, current_score: int, is_chase_succes
                                 parse_mode=ParseMode.HTML
                             )
                     
-                    # Send rank-up celebration for player 2
-                    if old_tier_p2 != new_tier_p2 and new_tier_p2:
-                        celebration = get_rank_up_message(new_tier_p2, game["joiner_name"], player2_id, new_rating_p2)
+                    # Send rank-up celebration for loser (if they ranked up somehow)
+                    if old_tier_loser != new_tier_loser and new_tier_loser:
+                        celebration = get_rank_up_message(new_tier_loser, loser_name, loser_id, loser_new)
                         if celebration:
                             await asyncio.sleep(1)
                             await context.bot.send_message(
