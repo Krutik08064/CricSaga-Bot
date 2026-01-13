@@ -3441,25 +3441,48 @@ async def handle_game_end(query, game: dict, current_score: int, is_chase_succes
         # PHASE 2: Update ELO ratings for ranked matches
         if game.get('ranked_match', False) or game.get('is_ranked', False):
             try:
-                player1_id = game['creator']  # First batsman (bowler)
-                player2_id = game['joiner']  # Second batsman (chaser)
+                # Use actual game roles (who batted first vs second)
+                first_batsman_id = game['bowler']  # Bowler in 2nd innings = batted first
+                second_batsman_id = game['batsman']  # Batsman in 2nd innings = chasing
+                first_batsman_name = game['bowler_name']
+                second_batsman_name = game['batsman_name']
+                
+                # Get ratings (stored by user_id, not by batting order)
+                player1_id = game['creator']
+                player2_id = game['joiner']
                 player1_rating = game.get('player1_rating') or game.get('p1_rating', 1000)
                 player2_rating = game.get('player2_rating') or game.get('p2_rating', 1000)
                 
-                # Determine winner
-                # Player1 (creator/bowler) wins if chase fails
-                # Player2 (joiner/batsman) wins if chase succeeds
+                # Map ratings to actual batting order
+                if first_batsman_id == player1_id:
+                    first_batsman_rating = player1_rating
+                    second_batsman_rating = player2_rating
+                else:
+                    first_batsman_rating = player2_rating
+                    second_batsman_rating = player1_rating
+                
+                # Determine winner based on chase result
+                # Winner = 1 means first batsman wins (chase failed)
+                # Winner = 2 means second batsman wins (chase succeeded)
                 if runs_short == 0:
                     winner = 0  # Draw
                 elif is_chase_successful:
-                    winner = 2  # Player2 (joiner/chaser) wins
+                    winner = 2  # Second batsman (chaser) wins
                 else:
-                    winner = 1  # Player1 (creator/bowler) wins
+                    winner = 1  # First batsman wins (defended score)
                 
-                # Calculate ELO changes
-                rating_change_p1, rating_change_p2 = calculate_elo_change(
-                    player1_rating, player2_rating, winner, k_factor=32
+                # Calculate ELO changes based on batting order
+                rating_change_first, rating_change_second = calculate_elo_change(
+                    first_batsman_rating, second_batsman_rating, winner, k_factor=32
                 )
+                
+                # Map rating changes back to creator/joiner for database storage
+                if first_batsman_id == player1_id:
+                    rating_change_p1 = rating_change_first
+                    rating_change_p2 = rating_change_second
+                else:
+                    rating_change_p1 = rating_change_second
+                    rating_change_p2 = rating_change_first
                 
                 # ========== ANTI-CHEAT PROCESSING ==========
                 
@@ -3621,19 +3644,43 @@ async def handle_game_end(query, game: dict, current_score: int, is_chase_succes
                 # Send rating changes as separate message AFTER database commit
                 try:
                     logger.info(f"Attempting to send rating message to chat {query.message.chat_id}")
-                    # Tag both users using HTML mentions
-                    creator_mention = f'<a href="tg://user?id={player1_id}">{game["creator_name"]}</a>'
-                    joiner_mention = f'<a href="tg://user?id={player2_id}">{game["joiner_name"]}</a>'
+                    
+                    # Determine winner for display
+                    winner_name = second_batsman_name if is_chase_successful else first_batsman_name
+                    winner_id = second_batsman_id if is_chase_successful else first_batsman_id
+                    loser_name = first_batsman_name if is_chase_successful else second_batsman_name
+                    loser_id = first_batsman_id if is_chase_successful else second_batsman_id
+                    
+                    # Get rating changes for winner and loser
+                    if winner_id == first_batsman_id:
+                        winner_change = rating_change_first
+                        loser_change = rating_change_second
+                        winner_old = first_batsman_rating
+                        loser_old = second_batsman_rating
+                    else:
+                        winner_change = rating_change_second
+                        loser_change = rating_change_first
+                        winner_old = second_batsman_rating
+                        loser_old = first_batsman_rating
+                    
+                    winner_new = winner_old + winner_change
+                    loser_new = loser_old + loser_change
+                    winner_rank = get_rank_from_rating(winner_new)
+                    loser_rank = get_rank_from_rating(loser_new)
+                    
+                    # Tag users
+                    winner_mention = f'<a href="tg://user?id={winner_id}">{winner_name}</a>'
+                    loser_mention = f'<a href="tg://user?id={loser_id}">{loser_name}</a>'
                     
                     rating_message = (
                         f"<b>📊 RANKED MATCH COMPLETE - #{match_id}</b>\n\n"
                         f"<b>Rating Changes:</b>\n"
-                        f"🔹 {creator_mention}\n"
-                        f"   {player1_rating} → {new_rating_p1} ({rating_change_p1:+d})\n"
-                        f"   {new_rank_p1}\n\n"
-                        f"🔸 {joiner_mention}\n"
-                        f"   {player2_rating} → {new_rating_p2} ({rating_change_p2:+d})\n"
-                        f"   {new_rank_p2}"
+                        f"🔹 {winner_mention} 🏆\n"
+                        f"   {winner_old} → {winner_new} ({winner_change:+d})\n"
+                        f"   {winner_rank}\n\n"
+                        f"🔸 {loser_mention}\n"
+                        f"   {loser_old} → {loser_new} ({loser_change:+d})\n"
+                        f"   {loser_rank}"
                     )
                     
                     logger.info(f"Sending rating message: {rating_message}")
@@ -8337,6 +8384,13 @@ async def update_player_stats(user_id: str, **stats) -> bool:
             return False
             
         with conn.cursor() as cur:
+            # Ensure user exists in users table first
+            cur.execute("""
+                INSERT INTO users (telegram_id, first_name, username)
+                VALUES (%s, 'Player', 'player')
+                ON CONFLICT (telegram_id) DO NOTHING
+            """, (user_id,))
+            
             # Update all stats in a single query
             cur.execute("""
                 INSERT INTO player_stats 

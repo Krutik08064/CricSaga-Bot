@@ -17,9 +17,7 @@ SET rating = 1000,
     highest_rating = 1000,
     trust_score = 50,
     rating_suspended = FALSE,
-    suspension_reason = NULL,
-    account_flagged = FALSE,
-    updated_at = CURRENT_TIMESTAMP;
+    account_flagged = FALSE;
 
 -- Reset player_stats to default
 UPDATE player_stats
@@ -45,13 +43,7 @@ SET matches_played = 0,
     last_five_scores = '[]',
     total_runs_scored = 0,
     total_wickets_taken = 0,
-    total_boundaries = 0,
-    last_updated = CURRENT_TIMESTAMP;
-
--- Clear match history
-TRUNCATE TABLE match_history_detailed;
-TRUNCATE TABLE match_patterns;
-TRUNCATE TABLE suspicious_activities;
+    total_boundaries = 0;
 
 -- Verification
 SELECT 'Career stats reset' AS status, COUNT(*) AS count FROM career_stats WHERE rating = 1000;
