@@ -1132,8 +1132,8 @@ async def check_match_patterns(player1_id: str, player2_id: str) -> tuple[bool, 
             cur.execute("""
                 SELECT total_matches, wins, losses, matches_last_24h, last_match_time
                 FROM match_patterns
-                WHERE player_id = %s AND opponent_id = %s
-            """, (player1_id, player2_id))
+                WHERE player_id::bigint = %s AND opponent_id::bigint = %s
+            """, (int(player1_id), int(player2_id)))
             
             pattern = cur.fetchone()
             if not pattern:
@@ -1153,8 +1153,8 @@ async def check_match_patterns(player1_id: str, player2_id: str) -> tuple[bool, 
             # Check 2: Too many total matches with same opponent
             # Get player's total match count
             cur.execute("""
-                SELECT total_matches FROM career_stats WHERE user_id = %s
-            """, (player1_id,))
+                SELECT total_matches FROM career_stats WHERE user_id::bigint = %s
+            """, (int(player1_id),))
             total_user_matches = cur.fetchone()
             if total_user_matches and total_user_matches[0] > 0:
                 opponent_percentage = total_matches / total_user_matches[0]
@@ -1199,11 +1199,11 @@ async def detect_win_trading(player1_id: str, player2_id: str) -> tuple[bool, st
             cur.execute("""
                 SELECT winner_id, match_date
                 FROM match_history_detailed
-                WHERE (player1_id = %s AND player2_id = %s)
-                   OR (player1_id = %s AND player2_id = %s)
+                WHERE (player1_id::bigint = %s AND player2_id::bigint = %s)
+                   OR (player1_id::bigint = %s AND player2_id::bigint = %s)
                 ORDER BY match_date DESC
                 LIMIT 10
-            """, (player1_id, player2_id, player2_id, player1_id))
+            """, (int(player1_id), int(player2_id), int(player2_id), int(player1_id)))
             
             matches = cur.fetchall()
             if len(matches) < WIN_TRADING_CONSECUTIVE_THRESHOLD:
@@ -1244,8 +1244,8 @@ async def calculate_trust_score(user_id: str) -> int:
             cur.execute("""
                 SELECT total_matches, wins, losses, rating
                 FROM career_stats
-                WHERE user_id = %s
-            """, (user_id,))
+                WHERE user_id::bigint = %s
+            """, (int(user_id),))
             stats = cur.fetchone()
             if not stats:
                 return 50
@@ -1256,8 +1256,8 @@ async def calculate_trust_score(user_id: str) -> int:
             cur.execute("""
                 SELECT COUNT(DISTINCT opponent_id) 
                 FROM match_patterns 
-                WHERE player_id = %s
-            """, (user_id,))
+                WHERE player_id::bigint = %s
+            """, (int(user_id),))
             unique_opponents = cur.fetchone()[0] or 0
             opponent_bonus = min(unique_opponents * TRUST_SCORE_ADJUSTMENTS['unique_opponent'], 30)
             adjustments.append(('Unique opponents', opponent_bonus))
@@ -1266,8 +1266,8 @@ async def calculate_trust_score(user_id: str) -> int:
             cur.execute("""
                 SELECT COUNT(*), SUM(trust_score_impact)
                 FROM suspicious_activities
-                WHERE user_id = %s AND cleared = FALSE
-            """, (user_id,))
+                WHERE user_id::bigint = %s AND cleared = FALSE
+            """, (int(user_id),))
             flag_result = cur.fetchone()
             if flag_result and flag_result[0] > 0:
                 flag_penalty = flag_result[1] or 0
@@ -1280,8 +1280,8 @@ async def calculate_trust_score(user_id: str) -> int:
             cur.execute("""
                 SELECT COUNT(*)
                 FROM match_patterns
-                WHERE player_id = %s AND is_flagged = TRUE
-            """, (user_id,))
+                WHERE player_id::bigint = %s AND is_flagged = TRUE
+            """, (int(user_id),))
             flagged_patterns = cur.fetchone()[0] or 0
             if flagged_patterns > 0:
                 adjustments.append(('Suspicious patterns', -25 * flagged_patterns))
@@ -1294,8 +1294,8 @@ async def calculate_trust_score(user_id: str) -> int:
             cur.execute("""
                 UPDATE career_stats
                 SET trust_score = %s
-                WHERE user_id = %s
-            """, (final_score, user_id))
+                WHERE user_id::bigint = %s
+            """, (final_score, int(user_id)))
             conn.commit()
             
             logger.info(f"Trust score for {user_id}: {final_score} (adjustments: {adjustments})")
@@ -1317,8 +1317,8 @@ async def get_rating_multiplier(user_id: str) -> float:
         
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT total_matches FROM career_stats WHERE user_id = %s
-            """, (user_id,))
+                SELECT total_matches FROM career_stats WHERE user_id::bigint = %s
+            """, (int(user_id),))
             result = cur.fetchone()
             if not result:
                 return 0.30  # New player, 30% multiplier
