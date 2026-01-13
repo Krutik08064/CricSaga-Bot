@@ -7278,7 +7278,11 @@ async def ranked(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # ========== ANTI-CHEAT CHECKS ==========
         
-        # Check 1: Account age verification
+        # Check 1: Account age verification (DISABLED - checks bot registration, not Telegram account age)
+        # Telegram API doesn't provide account creation date, only user ID
+        # Lower user IDs = older accounts, but this isn't reliable enough
+        # Commenting out to avoid false positives
+        """
         is_valid_age, account_age = await check_telegram_account_age(update.effective_user)
         if not is_valid_age:
             await update.message.reply_text(
@@ -7291,6 +7295,7 @@ async def ranked(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode=ParseMode.MARKDOWN_V2
             )
             return
+        """
         
         # Check 2: Trust score check
         trust_score = stats.get('trust_score', 50)
