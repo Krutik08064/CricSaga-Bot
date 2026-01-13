@@ -290,8 +290,9 @@ DB_CONFIG = {
 }
 
 # Add near the top with other constants
-DB_POOL_MIN = 5
-DB_POOL_MAX = 50
+# Reduced for Supabase Session Mode connection limits
+DB_POOL_MIN = 1
+DB_POOL_MAX = 5  # Slightly higher to allow some concurrency
 db_pool = None
 
 # Add this after DB_CONFIG
@@ -5439,12 +5440,18 @@ def init_database_connection():
         max_retries = 5
         retry_delay = 10
         
+        # Use global db instance to avoid creating multiple pools
+        global db
+        
         for attempt in range(max_retries):
             try:
                 logger.info(f"Database connection attempt {attempt + 1}")
                 logger.info(f"Connecting to: {DB_CONFIG['host']}:{DB_CONFIG['port']}")
                 
-                db = DatabaseHandler()
+                # Only create new instance if db doesn't exist or is disconnected
+                if not db or not db.check_connection():
+                    db = DatabaseHandler()
+                
                 if db.check_connection():
                     logger.info("Successfully connected to database")
                     return True
