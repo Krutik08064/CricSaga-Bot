@@ -291,8 +291,8 @@ DB_CONFIG = {
 
 # Add near the top with other constants
 # Optimized for Supabase Transaction Mode
-DB_POOL_MIN = 2
-DB_POOL_MAX = 10  # Higher limit safe with Transaction Mode
+DB_POOL_MIN = 5
+DB_POOL_MAX = 20  # Transaction Mode supports 1000+ connections
 CONNECTION_MAX_AGE = 300  # Recycle connections after 5 minutes
 db_pool = None
 last_pool_check = 0
@@ -1130,8 +1130,8 @@ async def check_telegram_account_age(user) -> tuple[bool, int]:
         if conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT registration_date FROM users WHERE telegram_id = %s
-                """, (str(user_id),))
+                    SELECT registered_at FROM users WHERE telegram_id::bigint = %s
+                """, (user_id,))
                 result = cur.fetchone()
                 if result and result[0]:
                     account_age = (datetime.now(timezone.utc) - result[0]).days
@@ -3615,71 +3615,77 @@ async def handle_game_end(query, game: dict, current_score: int, is_chase_succes
                             
                             logger.info(f"📊 Ranked match {match_id}: P1 {rating_change_p1:+d}, P2 {rating_change_p2:+d}")
                             
-                            # Send rating changes as separate message NOW (after calculation)
-                            try:
-                                logger.info(f"Sending rating changes message to chat {query.message.chat_id}")
-                                # Tag both users using HTML mentions
-                                creator_mention = f'<a href="tg://user?id={player1_id}">{game["creator_name"]}</a>'
-                                joiner_mention = f'<a href="tg://user?id={player2_id}">{game["joiner_name"]}</a>'
-                                
-                                rating_message = (
-                                    f"<b>📊 RANKED MATCH COMPLETE - #{match_id}</b>\n\n"
-                                    f"<b>Rating Changes:</b>\n"
-                                    f"🔹 {creator_mention}\n"
-                                    f"   {player1_rating} → {new_rating_p1} ({rating_change_p1:+d})\n"
-                                    f"   {new_rank_p1}\n\n"
-                                    f"🔸 {joiner_mention}\n"
-                                    f"   {player2_rating} → {new_rating_p2} ({rating_change_p2:+d})\n"
-                                    f"   {new_rank_p2}"
-                                )
-                                
-                                await context.bot.send_message(
-                                    chat_id=query.message.chat_id,
-                                    text=rating_message,
-                                    parse_mode=ParseMode.HTML
-                                )
-                                
-                                # PHASE 4: Check for rank-up celebrations
-                                old_rank_p1 = get_rank_from_rating(player1_rating)
-                                old_rank_p2 = get_rank_from_rating(player2_rating)
-                                
-                                # Extract tier name (e.g., "Silver" from "Silver II")
-                                def get_tier_name(rank_str):
-                                    return rank_str.split()[0] if rank_str else ""
-                                
-                                old_tier_p1 = get_tier_name(old_rank_p1)
-                                new_tier_p1 = get_tier_name(new_rank_p1)
-                                old_tier_p2 = get_tier_name(old_rank_p2)
-                                new_tier_p2 = get_tier_name(new_rank_p2)
-                                
-                                # Send rank-up celebration for player 1
-                                if old_tier_p1 != new_tier_p1 and new_tier_p1:
-                                    celebration = get_rank_up_message(new_tier_p1, game["creator_name"], player1_id, new_rating_p1)
-                                    if celebration:
-                                        await asyncio.sleep(1)  # Small delay after rating message
-                                        await context.bot.send_message(
-                                            chat_id=query.message.chat_id,
-                                            text=celebration,
-                                            parse_mode=ParseMode.HTML
-                                        )
-                                
-                                # Send rank-up celebration for player 2
-                                if old_tier_p2 != new_tier_p2 and new_tier_p2:
-                                    celebration = get_rank_up_message(new_tier_p2, game["joiner_name"], player2_id, new_rating_p2)
-                                    if celebration:
-                                        await asyncio.sleep(1)
-                                        await context.bot.send_message(
-                                            chat_id=query.message.chat_id,
-                                            text=celebration,
-                                            parse_mode=ParseMode.HTML
-                                        )
-                                
-                            except Exception as rating_error:
-                                logger.error(f"Error sending rating message: {rating_error}")
+                    except Exception as db_error:
+                        logger.error(f"Database update error: {db_error}", exc_info=True)
                     finally:
                         return_db_connection(conn)
+                
+                # Send rating changes as separate message AFTER database commit
+                try:
+                    logger.info(f"Attempting to send rating message to chat {query.message.chat_id}")
+                    # Tag both users using HTML mentions
+                    creator_mention = f'<a href="tg://user?id={player1_id}">{game["creator_name"]}</a>'
+                    joiner_mention = f'<a href="tg://user?id={player2_id}">{game["joiner_name"]}</a>'
+                    
+                    rating_message = (
+                        f"<b>📊 RANKED MATCH COMPLETE - #{match_id}</b>\n\n"
+                        f"<b>Rating Changes:</b>\n"
+                        f"🔹 {creator_mention}\n"
+                        f"   {player1_rating} → {new_rating_p1} ({rating_change_p1:+d})\n"
+                        f"   {new_rank_p1}\n\n"
+                        f"🔸 {joiner_mention}\n"
+                        f"   {player2_rating} → {new_rating_p2} ({rating_change_p2:+d})\n"
+                        f"   {new_rank_p2}"
+                    )
+                    
+                    logger.info(f"Sending rating message: {rating_message}")
+                    await context.bot.send_message(
+                        chat_id=query.message.chat_id,
+                        text=rating_message,
+                        parse_mode=ParseMode.HTML
+                    )
+                    logger.info("✅ Rating message sent successfully!")
+                    
+                    # PHASE 4: Check for rank-up celebrations
+                    old_rank_p1 = get_rank_from_rating(player1_rating)
+                    old_rank_p2 = get_rank_from_rating(player2_rating)
+                    
+                    # Extract tier name (e.g., "Silver" from "Silver II")
+                    def get_tier_name(rank_str):
+                        return rank_str.split()[0] if rank_str else ""
+                    
+                    old_tier_p1 = get_tier_name(old_rank_p1)
+                    new_tier_p1 = get_tier_name(new_rank_p1)
+                    old_tier_p2 = get_tier_name(old_rank_p2)
+                    new_tier_p2 = get_tier_name(new_rank_p2)
+                    
+                    # Send rank-up celebration for player 1
+                    if old_tier_p1 != new_tier_p1 and new_tier_p1:
+                        celebration = get_rank_up_message(new_tier_p1, game["creator_name"], player1_id, new_rating_p1)
+                        if celebration:
+                            await asyncio.sleep(1)  # Small delay after rating message
+                            await context.bot.send_message(
+                                chat_id=query.message.chat_id,
+                                text=celebration,
+                                parse_mode=ParseMode.HTML
+                            )
+                    
+                    # Send rank-up celebration for player 2
+                    if old_tier_p2 != new_tier_p2 and new_tier_p2:
+                        celebration = get_rank_up_message(new_tier_p2, game["joiner_name"], player2_id, new_rating_p2)
+                        if celebration:
+                            await asyncio.sleep(1)
+                            await context.bot.send_message(
+                                chat_id=query.message.chat_id,
+                                text=celebration,
+                                parse_mode=ParseMode.HTML
+                            )
+                    
+                except Exception as rating_error:
+                    logger.error(f"Error sending rating message: {rating_error}", exc_info=True)
+                    
             except Exception as e:
-                logger.error(f"Error updating ranked match ratings: {e}")
+                logger.error(f"Error updating ranked match ratings: {e}", exc_info=True)
         
         # NOTE: Career/ranking updates happen ONLY in /ranked matches (Phase 2)
         # Regular /gameon matches DO NOT affect ratings

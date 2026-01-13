@@ -1,12 +1,14 @@
 -- Fix: Remove automatic match counting trigger to prevent double counting
 -- The bot code already handles match counting in career_stats manually
 
--- STEP 1: Kill all idle connections (CRITICAL - fixes connection pool exhaustion)
+-- STEP 1: Kill only YOUR idle connections (no superuser needed)
+-- This will only kill connections belonging to your user
 SELECT pg_terminate_backend(pid)
 FROM pg_stat_activity
 WHERE datname = current_database()
   AND pid <> pg_backend_pid()
   AND state = 'idle'
+  AND usename = current_user
   AND state_change < NOW() - INTERVAL '5 minutes';
 
 -- STEP 2: Drop the problematic trigger
