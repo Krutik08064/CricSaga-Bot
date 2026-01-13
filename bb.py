@@ -313,7 +313,7 @@ def init_db_pool():
             
         # Create connection pool with retry logic
         retry_count = 0
-        max_retries = 3
+        max_retries = 5  # Increased retries
         
         while retry_count < max_retries:
             try:
@@ -329,18 +329,20 @@ def init_db_pool():
                     cursor.execute('SELECT 1')
                 db_pool.putconn(conn)
                 
-                logger.info("Database connection pool created successfully")
+                logger.info(f"✅ Database connection pool created successfully ({DB_POOL_MIN}-{DB_POOL_MAX} connections)")
                 return True
                 
             except Exception as e:
                 retry_count += 1
-                logger.error(f"Connection attempt {retry_count} failed: {e}")
+                logger.error(f"Connection attempt {retry_count}/{max_retries} failed: {e}")
                 if retry_count < max_retries:
-                    time.sleep(5)  # Wait 5 seconds before retrying
+                    wait_time = retry_count * 3  # Exponential backoff: 3, 6, 9, 12 seconds
+                    logger.info(f"Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
                     continue
                 break
                 
-        logger.error("Failed to create connection pool after all retries")
+        logger.error("❌ Failed to create connection pool after all retries")
         return False
         
     except Exception as e:
