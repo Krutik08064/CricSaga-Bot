@@ -277,7 +277,7 @@ DB_CONFIG = {
     'user': os.getenv('DB_USER'),
     'password': os.getenv('DB_PASSWORD'),
     'host': os.getenv('DB_HOST', 'localhost'),
-    'port': int(os.getenv('DB_PORT', '5432')),
+    'port': int(os.getenv('DB_PORT', '6543')),  # Default to Transaction Mode (was 5432)
     'connect_timeout': 10,  # 10 second connection timeout
     'sslmode': 'require',
     'keepalives': 1,
@@ -1466,10 +1466,18 @@ async def record_match_detailed(game: dict, winner_id: str, match_type: str = 'r
 class DatabaseHandler:
     def __init__(self):
         self.pool = None
-        self._init_pool()
-        if not self._verify_tables():
-            self._init_tables()
-        self.load_registered_users()
+        try:
+            self._init_pool()
+            if not self._verify_tables():
+                self._init_tables()
+            self.load_registered_users()
+        except Exception as e:
+            logger.error(f"❌ CRITICAL: Failed to initialize database: {e}")
+            logger.error("Please check your database configuration:")
+            logger.error("- Ensure DB_PORT is 6543 (Transaction Mode), not 5432 (Session Mode)")
+            logger.error("- Verify DATABASE_URL or DB_HOST/DB_USER/DB_PASSWORD are correct")
+            logger.error("- Check Supabase connection pooler is enabled")
+            raise SystemExit(1)  # Exit immediately with error code
 
     def load_registered_users(self):
         """Load registered users from database into memory"""
