@@ -310,6 +310,13 @@ def init_db_pool():
 
         # Log connection attempt
         logger.info(f"Attempting to connect to database at {DB_CONFIG['host']}:{DB_CONFIG['port']}")
+        
+        # Warn if using Session Mode
+        if DB_CONFIG['port'] == 5432:
+            logger.warning("⚠️ WARNING: Using Session Mode (port 5432) - Limited to ~15 connections!")
+            logger.warning("⚠️ RECOMMENDED: Change DB_PORT to 6543 (Transaction Mode) for 1000+ connections")
+        else:
+            logger.info(f"✅ Using Transaction Mode (port {DB_CONFIG['port']})")
             
         # Create connection pool with retry logic
         retry_count = 0
