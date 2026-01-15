@@ -297,6 +297,10 @@ CONNECTION_MAX_AGE = 300  # Recycle connections after 5 minutes
 db_pool = None
 last_pool_check = 0
 
+# Admin logging configuration (separate bot for monitoring both CricSaga & Arena of Champions)
+ADMIN_LOG_BOT_TOKEN = os.getenv('ADMIN_LOG_BOT_TOKEN', '')  # Separate bot token for logging
+ADMIN_LOG_CHAT_ID = os.getenv('ADMIN_LOG_CHAT_ID', '')  # Chat ID to send logs to
+
 # Add this after DB_CONFIG
 DB_SCHEMA_VERSION = 2  # For tracking database updates
 
@@ -598,6 +602,30 @@ def is_connection_alive(connection):
             return True
     except (psycopg2.Error, AttributeError):
         return False
+
+async def send_admin_log(message: str):
+    """Send log message to admin chat via separate logging bot (non-blocking)"""
+    if not ADMIN_LOG_BOT_TOKEN or not ADMIN_LOG_CHAT_ID:
+        return  # Logging not configured, skip silently
+    
+    try:
+        import aiohttp
+        url = f"https://api.telegram.org/bot{ADMIN_LOG_BOT_TOKEN}/sendMessage"
+        payload = {
+            'chat_id': ADMIN_LOG_CHAT_ID,
+            'text': message,
+            'parse_mode': 'HTML',
+            'disable_notification': True  # Silent notifications
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                if response.status != 200:
+                    logger.debug(f"Admin log failed: {response.status}")
+    except Exception as e:
+        # Never let logging errors break the bot
+        logger.debug(f"Admin log error: {e}")
+        pass
 
 # Note: DatabaseHandler class is defined below, initialization happens after class definition
 
@@ -3157,7 +3185,7 @@ async def create_ranked_match(player1_data: dict, player2_data: dict, chat_id: i
             'joiner_name': player2_data['username'],
             'status': 'toss',
             'chat_id': chat_id,
-            'mode': 'blitz',  # Ranked matches are always blitz mode
+            'mode': 'survival',  # Ranked matches are always survival mode (1 wicket, unlimited overs)
             'max_wickets': 3,
             'max_overs': 3,
             'ranked_match': True,  # CRITICAL FLAG: Marks this as a rated match
@@ -3189,6 +3217,9 @@ async def update_search_message(user_id: int, message, username: str, rating: in
     """Periodically update the search status message with elapsed time"""
     try:
         start_time = ranked_queue[user_id]['joined_at']
+        
+        # Log to admin
+        await send_admin_log(f"👤 {username} ({user_id}) joined ranked queue | Rating: {rating} ({rank_tier})")
         
         while user_id in ranked_queue:
             elapsed = int(time.time() - start_time)
@@ -3529,18 +3560,18 @@ async def handle_game_end(query, game: dict, current_score: int, is_chase_succes
                 multiplier_p1 = await get_rating_multiplier(player1_id)
                 multiplier_p2 = await get_rating_multiplier(player2_id)
                 
-                # Get trust scores
+                # Get trust scores (for tracking only, no penalties)
                 trust_p1 = await calculate_trust_score(player1_id)
                 trust_p2 = await calculate_trust_score(player2_id)
                 
-                # Trust score multipliers
-                trust_mult_p1 = 0.5 if trust_p1 < MIN_TRUST_SCORE else 1.0
-                trust_mult_p2 = 0.5 if trust_p2 < MIN_TRUST_SCORE else 1.0
+                # NO PENALTIES - All multipliers set to 1.0
+                trust_mult_p1 = 1.0
+                trust_mult_p2 = 1.0
+                pattern_mult = 1.0
+                multiplier_p1 = 1.0
+                multiplier_p2 = 1.0
                 
-                # Pattern detection penalty
-                pattern_mult = 0.3 if (is_suspicious_p1 or is_suspicious_p2 or is_win_trading) else 1.0
-                
-                # Apply all multipliers
+                # Apply multipliers (all 1.0, so rating_change stays unchanged)
                 final_change_p1 = int(rating_change_p1 * multiplier_p1 * trust_mult_p1 * pattern_mult)
                 final_change_p2 = int(rating_change_p2 * multiplier_p2 * trust_mult_p2 * pattern_mult)
                 
@@ -3601,7 +3632,7 @@ async def handle_game_end(query, game: dict, current_score: int, is_chase_succes
                 if conn:
                     try:
                         with conn.cursor() as cur:
-                            # Update player 1 rating
+                            # Update player 1 rating with verification
                             new_rating_p1 = player1_rating + rating_change_p1
                             new_rank_p1 = get_rank_from_rating(new_rating_p1)
                             cur.execute("""
@@ -3614,9 +3645,15 @@ async def handle_game_end(query, game: dict, current_score: int, is_chase_succes
                                     losses = losses + %s,
                                     updated_at = CURRENT_TIMESTAMP
                                 WHERE user_id = %s
+                                RETURNING user_id, rating, total_matches, wins, losses
                             """, (rating_change_p1, new_rank_p1, game['creator_name'], 1 if winner == 1 else 0, 1 if winner == 2 else 0, player1_id))
+                            p1_result = cur.fetchone()
+                            if not p1_result:
+                                logger.error(f"❌ Failed to update stats for player1_id={player1_id}")
+                            else:
+                                logger.info(f"✅ P1 updated: rating={p1_result[1]}, matches={p1_result[2]}, wins={p1_result[3]}")
                             
-                            # Update player 2 rating
+                            # Update player 2 rating with verification
                             new_rating_p2 = player2_rating + rating_change_p2
                             new_rank_p2 = get_rank_from_rating(new_rating_p2)
                             cur.execute("""
@@ -3629,7 +3666,13 @@ async def handle_game_end(query, game: dict, current_score: int, is_chase_succes
                                     losses = losses + %s,
                                     updated_at = CURRENT_TIMESTAMP
                                 WHERE user_id = %s
+                                RETURNING user_id, rating, total_matches, wins, losses
                             """, (rating_change_p2, new_rank_p2, game['joiner_name'], 1 if winner == 2 else 0, 1 if winner == 1 else 0, player2_id))
+                            p2_result = cur.fetchone()
+                            if not p2_result:
+                                logger.error(f"❌ Failed to update stats for player2_id={player2_id}")
+                            else:
+                                logger.info(f"✅ P2 updated: rating={p2_result[1]}, matches={p2_result[2]}, wins={p2_result[3]}")
                             
                             # Save to ranked_matches table
                             cur.execute("""
@@ -3695,6 +3738,14 @@ async def handle_game_end(query, game: dict, current_score: int, is_chase_succes
                     loser_new = loser_old + loser_change
                     winner_rank = get_rank_from_rating(winner_new)
                     loser_rank = get_rank_from_rating(loser_new)
+                    
+                    # Log match result to admin
+                    await send_admin_log(
+                        f"🏆 Match #{match_id} Complete | Winner: {winner_name} | "
+                        f"Scores: {game['score']['innings1']} vs {game['score']['innings2']} | "
+                        f"Ratings: {winner_name} {winner_old}→{winner_new} ({winner_change:+d}), "
+                        f"{loser_name} {loser_old}→{loser_new} ({loser_change:+d})"
+                    )
                     
                     # Tag users
                     winner_mention = f'<a href="tg://user?id={winner_id}">{winner_name}</a>'
@@ -7404,6 +7455,12 @@ async def ranked(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             
             if match_id:
+                # Log match start to admin
+                await send_admin_log(
+                    f"🏏 Match #{match_id} Started | "
+                    f"{username} ({rating}) vs {opponent['username']} ({opponent['rating']})"
+                )
+                
                 # Start the toss
                 game = games[str(chat_id)]
                 game_id = str(chat_id)  # Use chat_id as game_id for lookup
@@ -7432,7 +7489,7 @@ async def ranked(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"🔹 {user_mention} \\({rating}\\)\n"
                     f"🔸 {opponent_mention} \\({opponent['rating']}\\)\n\n"
                     f"*🏏 FORMAT*\n"
-                    f"Mode: Blitz \\(3 overs, 3 wickets\\)\n"
+                    f"Mode: Survival \\(1 wicket, unlimited overs\\)\n"
                     f"Type: Ranked \\(Rated Match\\)\n\n"
                     f"*🎲 TOSS TIME*\n"
                     f"_{user_mention}, choose ODD or EVEN\\!_"
@@ -7458,7 +7515,7 @@ async def ranked(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             f"🔹 {user_mention} \\({rating}\\)\n"
                             f"🔸 {opponent_mention} \\({opponent['rating']}\\)\n\n"
                             f"*🏏 FORMAT*\n"
-                            f"Mode: Blitz \\(3 overs, 3 wickets\\)\n"
+                            f"Mode: Survival \\(1 wicket, unlimited overs\\)\n"
                             f"Type: Ranked \\(Rated Match\\)\n\n"
                             f"*⏳ WAITING*\n"
                             f"_{user_mention} is choosing the toss\\.\\.\\._"
@@ -7576,7 +7633,7 @@ async def periodic_matchmaking_check(user_id: int, chat_id: int):
                         f"🔹 {escape_markdown_v2_custom(username)} \\({rating}\\)\n"
                         f"🔸 {escape_markdown_v2_custom(opponent['username'])} \\({opponent['rating']}\\)\n\n"
                         f"*🏏 FORMAT*\n"
-                        f"Mode: Blitz \\(3 overs, 3 wickets\\)\n"
+                        f"Mode: Survival \\(1 wicket, unlimited overs\\)\n"
                         f"Type: Ranked \\(Rated Match\\)\n\n"
                         f"*🪙 TOSS TIME*\n"
                         f"{escape_markdown_v2_custom(username)}, call it\\!"
@@ -7602,7 +7659,7 @@ async def periodic_matchmaking_check(user_id: int, chat_id: int):
                                 f"🔹 {escape_markdown_v2_custom(username)} \\({rating}\\)\n"
                                 f"🔸 {escape_markdown_v2_custom(opponent['username'])} \\({opponent['rating']}\\)\n\n"
                                 f"*🏏 FORMAT*\n"
-                                f"Mode: Blitz \\(3 overs, 3 wickets\\)\n"
+                                f"Mode: Survival \\(1 wicket, unlimited overs\\)\n"
                                 f"Type: Ranked \\(Rated Match\\)\n\n"
                                 f"*⏳ WAITING*\n"
                                 f"_{escape_markdown_v2_custom(username)} is choosing the toss\\.\\.\\._"
@@ -7905,7 +7962,7 @@ async def challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"<a href='tg://user?id={target_id}'>{target_name}</a>\n"
             f"Rating: {target_stats['rating']} ({target_rank})\n\n"
             f"<b>🏏 MATCH FORMAT</b>\n"
-            f"Mode: Blitz (3 overs, 3 wickets)\n"
+            f"Mode: Survival (1 wicket, unlimited overs)\n"
             f"Type: Ranked (Rated Match)\n\n"
             f"<i>⏳ <a href='tg://user?id={target_id}'>{target_name}</a>, you have 60 seconds to respond...</i>"
         )
@@ -8095,9 +8152,9 @@ async def handle_challenge_accept(update: Update, context: ContextTypes.DEFAULT_
         'match_type': 'ranked',
         'is_ranked': True,
         'status': 'playing',
-        'mode': 'Blitz',
-        'max_overs': 3,
-        'max_wickets': 3,
+        'mode': 'Survival',
+        'max_overs': 999,
+        'max_wickets': 1,
         'overs': 3,
         'wickets': 0,
         'balls': 0,
@@ -8158,7 +8215,7 @@ async def handle_challenge_accept(update: Update, context: ContextTypes.DEFAULT_
         f"🔹 <a href='tg://user?id={challenger_id}'>{challenger_name}</a> ({challenger_rating})\n"
         f"🔸 <a href='tg://user?id={target_id}'>{target_name}</a> ({target_rating})\n\n"
         f"<b>🏏 FORMAT</b>\n"
-        f"Mode: Blitz (3 overs, 3 wickets)\n"
+        f"Mode: Survival (1 wicket, unlimited overs)\n"
         f"Type: Ranked (Rated Match)\n\n"
         f"<b>🎲 TOSS TIME</b>\n"
         f"<i><a href='tg://user?id={challenger_id}'>{challenger_name}</a>, choose ODD or EVEN!</i>"
