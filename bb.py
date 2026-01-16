@@ -603,12 +603,13 @@ def is_connection_alive(connection):
     except (psycopg2.Error, AttributeError):
         return False
 
-async def send_admin_log(message: str, log_type: str = "info"):
+async def send_admin_log(message: str, log_type: str = "info", chat_context: str = None):
     """Send log message to admin chat via separate logging bot (non-blocking)
     
     Args:
         message: The log message to send
         log_type: Type of log - 'info', 'command', 'error', 'match', 'db_error'
+        chat_context: Chat context like "DM" or "GC: -1001234567890" or "GC: Group Name"
     """
     if not ADMIN_LOG_BOT_TOKEN or not ADMIN_LOG_CHAT_ID:
         return  # Logging not configured, skip silently
@@ -631,11 +632,14 @@ async def send_admin_log(message: str, log_type: str = "info"):
         }
         emoji = emoji_map.get(log_type, 'ℹ️')
         
+        # Add chat context if provided
+        context_line = f"\n📍 {chat_context}" if chat_context else ""
+        
         # Format with clean structure
         formatted_message = (
             f"<b>CricSaga Bot</b>\n"
             f"━━━━━━━━━━━━━━━\n"
-            f"{emoji} [{timestamp}] {message}"
+            f"{emoji} [{timestamp}] {message}{context_line}"
         )
         
         url = f"https://api.telegram.org/bot{ADMIN_LOG_BOT_TOKEN}/sendMessage"
@@ -654,6 +658,16 @@ async def send_admin_log(message: str, log_type: str = "info"):
         # Never let logging errors break the bot
         logger.debug(f"Admin log error: {e}")
         pass
+
+def get_chat_context(update: Update) -> str:
+    """Get formatted chat context for logging"""
+    chat_type = update.effective_chat.type
+    if chat_type == 'private':
+        return "DM"
+    else:
+        chat_title = update.effective_chat.title or "Group"
+        chat_id = update.effective_chat.id
+        return f"GC: {chat_title} ({chat_id})"
 
 # Note: DatabaseHandler class is defined below, initialization happens after class definition
 
@@ -4557,8 +4571,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Log command usage
     await send_admin_log(
-        f"User: {user.first_name} (@{user.username or 'no_username'}) | ID: {user.id} | Command: /start",
-        log_type="command"
+        f"CMD: /start by {user.first_name} (@{user.username or 'no_username'}, ID: {user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
     )
     
     # Check if user is member of required channels
@@ -4659,8 +4674,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Display comprehensive help information"""
     user = update.effective_user
     await send_admin_log(
-        f"User: {user.first_name} (@{user.username or 'no_username'}) | ID: {user.id} | Command: /help",
-        log_type="command"
+        f"CMD: /help by {user.first_name} (@{user.username or 'no_username'}, ID: {user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
     )
     
     help_text = (
@@ -6362,8 +6378,9 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     
     await send_admin_log(
-        f"User: {user_name} (@{user.username or 'no_username'}) | ID: {user_id} | Command: /profile",
-        log_type="command"
+        f"CMD: /profile by {user_name} (@{user.username or 'no_username'}, ID: {user_id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
     )
     
     try:
@@ -6857,8 +6874,9 @@ async def career(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     
     await send_admin_log(
-        f"User: {username} (@{user.username or 'no_username'}) | ID: {user_id} | Command: /career",
-        log_type="command"
+        f"CMD: /career by {username} (@{user.username or 'no_username'}, ID: {user_id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
     )
     
     try:
@@ -7276,8 +7294,9 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     
     await send_admin_log(
-        f"User: {user.first_name} (@{user.username or 'no_username'}) | ID: {user_id} | Command: /leaderboard",
-        log_type="command"
+        f"CMD: /leaderboard by {user.first_name} (@{user.username or 'no_username'}, ID: {user_id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
     )
     
     try:
@@ -7500,8 +7519,9 @@ async def ranked(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     
     await send_admin_log(
-        f"User: {username} (@{user.username or 'no_username'}) | ID: {user_id} | Command: /ranked",
-        log_type="command"
+        f"CMD: /ranked by {username} (@{user.username or 'no_username'}, ID: {user_id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
     )
     
     try:
@@ -7947,12 +7967,27 @@ async def challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     username = update.effective_user.first_name or update.effective_user.username or "Player"
     chat_id = update.effective_chat.id
+    chat_type = update.effective_chat.type
+    
+    # Get chat context for logging
+    if chat_type == 'private':
+        chat_context = "DM"
+    else:
+        chat_title = update.effective_chat.title or "Group"
+        chat_context = f"GC: {chat_title} ({chat_id})"
     
     logger.info(f"Challenge command received from {username} ({user_id}) in chat {chat_id}")
     
+    # Log command usage
+    await send_admin_log(
+        f"CMD: /challenge by {username} (ID: {user_id})",
+        log_type="command",
+        chat_context=chat_context
+    )
+    
     try:
         # Check if this is in a group
-        if update.effective_chat.type == 'private':
+        if chat_type == 'private':
             logger.info(f"Challenge rejected - private chat")
             await update.message.reply_text(
                 "❌ *Group Only*\n"
@@ -9624,6 +9659,32 @@ def main():
     application.add_handler(CallbackQueryHandler(handle_team_captain, pattern="^teamcap_"))
     application.add_handler(CallbackQueryHandler(handle_next_bowler, pattern="^nextbowl_"))
     application.add_handler(CallbackQueryHandler(handle_next_batter, pattern="^nextbat_"))
+
+    # Global error handler
+    async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Log all errors and send to admin log"""
+        try:
+            # Log to console
+            logger.error(f"Exception while handling update: {context.error}", exc_info=context.error)
+            
+            # Get chat context if update is available
+            chat_context = None
+            if update and hasattr(update, 'effective_chat'):
+                chat_context = get_chat_context(update)
+            
+            # Format error message for admin
+            error_msg = f"ERROR: {type(context.error).__name__}: {str(context.error)[:200]}"
+            if update and hasattr(update, 'effective_user'):
+                user = update.effective_user
+                error_msg += f"\nUser: {user.first_name} (@{user.username or 'none'}, ID: {user.id})"
+            
+            # Send to admin log
+            await send_admin_log(error_msg, log_type="error", chat_context=chat_context)
+        except Exception as e:
+            logger.error(f"Error in error handler: {e}")
+    
+    # Add error handler
+    application.add_error_handler(error_handler)
 
     # Define post_init callback to start background tasks
     async def post_init(application):
