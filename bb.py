@@ -4075,6 +4075,13 @@ async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Unauthorized")
         return
 
+    user = update.effective_user
+    await send_admin_log(
+        f"CMD: /broadcast by {user.first_name} (@{user.username or 'no_username'}, ID: {user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
+    )
+
     # Only proceed if message is replied to
     if not update.message.reply_to_message:
         await update.message.reply_text(
@@ -4114,8 +4121,11 @@ async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     user_failed += 1
                     logger.error(f"Failed to send to user {user_id}: {e}")
             
-            # Broadcast to groups
-            for group_id in AUTHORIZED_GROUPS:
+            # Broadcast to groups from database
+            cur.execute("SELECT group_id FROM authorized_groups WHERE is_active = TRUE")
+            groups = [row[0] for row in cur.fetchall()]
+            
+            for group_id in groups:
                 try:
                     await context.bot.copy_message(
                         chat_id=group_id,
@@ -4157,6 +4167,13 @@ async def botstats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not check_admin(str(update.effective_user.id)):
         await update.message.reply_text("❌ Unauthorized")
         return
+    
+    user = update.effective_user
+    await send_admin_log(
+        f"CMD: /botstats by {user.first_name} (@{user.username or 'no_username'}, ID: {user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
+    )
     
     try:
         conn = get_db_connection()
@@ -4220,6 +4237,199 @@ async def botstats(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return_db_connection(conn)
 
 # ========================================
+# NEW ADMIN COMMANDS - USER & GROUP MANAGEMENT
+# ========================================
+
+@check_blacklist()
+async def listusers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List all registered users"""
+    if not check_admin(str(update.effective_user.id)):
+        await update.message.reply_text("❌ Unauthorized")
+        return
+    
+    user = update.effective_user
+    await send_admin_log(
+        f"CMD: /listusers by {user.first_name} (@{user.username or 'no_username'}, ID: {user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
+    )
+    
+    try:
+        conn = get_db_connection()
+        if not conn:
+            await update.message.reply_text("❌ Database connection error")
+            return
+
+        with conn.cursor() as cur:
+            # Get total users count
+            cur.execute("SELECT COUNT(*) FROM users WHERE is_banned = FALSE")
+            total_users = cur.fetchone()[0]
+            
+            # Get users with stats
+            cur.execute("""
+                SELECT u.telegram_id, u.username, u.first_name, 
+                       cs.rating, cs.rank_tier, cs.total_matches
+                FROM users u
+                LEFT JOIN career_stats cs ON u.telegram_id = cs.user_id
+                WHERE u.is_banned = FALSE
+                ORDER BY cs.rating DESC NULLS LAST
+                LIMIT 20
+            """)
+            users = cur.fetchall()
+            
+            msg = f"👥 *REGISTERED USERS* ({total_users} total)\n"
+            msg += "━━━━━━━━━━━━━━━━\n\n"
+            
+            for i, user in enumerate(users, 1):
+                user_id, username, first_name, rating, rank, matches = user
+                username_str = f"@{username}" if username else "No username"
+                rating_str = f"{rating} ({rank})" if rating else "Not ranked"
+                matches_str = f"{matches}M" if matches else "0M"
+                
+                msg += f"{i}. {first_name} ({username_str})\n"
+                msg += f"   ID: `{user_id}` | {rating_str} | {matches_str}\n\n"
+            
+            if total_users > 20:
+                msg += f"\n_Showing top 20 of {total_users} users_"
+            
+            await update.message.reply_text(
+                msg,
+                parse_mode=ParseMode.MARKDOWN
+            )
+            
+    except Exception as e:
+        logger.error(f"Error in listusers: {e}")
+        await update.message.reply_text("❌ Error fetching users")
+    finally:
+        if conn:
+            return_db_connection(conn)
+
+@check_blacklist()
+async def listgroups(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List all authorized groups"""
+    if not check_admin(str(update.effective_user.id)):
+        await update.message.reply_text("❌ Unauthorized")
+        return
+    
+    user = update.effective_user
+    await send_admin_log(
+        f"CMD: /listgroups by {user.first_name} (@{user.username or 'no_username'}, ID: {user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
+    )
+    
+    try:
+        conn = get_db_connection()
+        if not conn:
+            await update.message.reply_text("❌ Database connection error")
+            return
+
+        with conn.cursor() as cur:
+            # Get all groups
+            cur.execute("""
+                SELECT group_id, group_name, added_by, is_active, added_at
+                FROM authorized_groups
+                ORDER BY added_at DESC
+            """)
+            groups = cur.fetchall()
+            
+            if not groups:
+                await update.message.reply_text("📢 No groups found in database")
+                return
+            
+            active_groups = [g for g in groups if g[3]]
+            inactive_groups = [g for g in groups if not g[3]]
+            
+            msg = f"📢 *AUTHORIZED GROUPS*\n"
+            msg += "━━━━━━━━━━━━━━━━\n\n"
+            
+            msg += f"🟢 *Active Groups* ({len(active_groups)})\n"
+            for group in active_groups:
+                group_id, group_name, added_by, is_active, added_at = group
+                msg += f"• {group_name}\n"
+                msg += f"  ID: `{group_id}`\n"
+                msg += f"  Added: {added_at.strftime('%Y-%m-%d')}\n\n"
+            
+            if inactive_groups:
+                msg += f"\n🔴 *Inactive Groups* ({len(inactive_groups)})\n"
+                for group in inactive_groups:
+                    group_id, group_name, _, _, _ = group
+                    msg += f"• {group_name} (`{group_id}`)\n"
+            
+            await update.message.reply_text(
+                msg,
+                parse_mode=ParseMode.MARKDOWN
+            )
+            
+    except Exception as e:
+        logger.error(f"Error in listgroups: {e}")
+        await update.message.reply_text("❌ Error fetching groups")
+    finally:
+        if conn:
+            return_db_connection(conn)
+
+@check_blacklist()
+async def userstats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Quick stats about users and groups"""
+    if not check_admin(str(update.effective_user.id)):
+        await update.message.reply_text("❌ Unauthorized")
+        return
+    
+    user = update.effective_user
+    await send_admin_log(
+        f"CMD: /userstats by {user.first_name} (@{user.username or 'no_username'}, ID: {user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
+    )
+    
+    try:
+        conn = get_db_connection()
+        if not conn:
+            await update.message.reply_text("❌ Database connection error")
+            return
+
+        with conn.cursor() as cur:
+            # Get user stats
+            cur.execute("SELECT COUNT(*) FROM users WHERE is_banned = FALSE")
+            total_users = cur.fetchone()[0]
+            
+            cur.execute("SELECT COUNT(*) FROM users WHERE is_banned = TRUE")
+            banned_users = cur.fetchone()[0]
+            
+            cur.execute("SELECT COUNT(*) FROM career_stats WHERE total_matches > 0")
+            active_players = cur.fetchone()[0]
+            
+            # Get group stats
+            cur.execute("SELECT COUNT(*) FROM authorized_groups WHERE is_active = TRUE")
+            active_groups = cur.fetchone()[0]
+            
+            cur.execute("SELECT COUNT(*) FROM authorized_groups WHERE is_active = FALSE")
+            inactive_groups = cur.fetchone()[0]
+            
+            msg = "📊 *USER & GROUP STATS*\n"
+            msg += "━━━━━━━━━━━━━━━━\n\n"
+            msg += "*👥 Users*\n"
+            msg += f"• Total Registered: {total_users}\n"
+            msg += f"• Active Players: {active_players}\n"
+            msg += f"• Banned: {banned_users}\n\n"
+            msg += "*📢 Groups*\n"
+            msg += f"• Active: {active_groups}\n"
+            msg += f"• Inactive: {inactive_groups}\n"
+            msg += f"• Total: {active_groups + inactive_groups}"
+            
+            await update.message.reply_text(
+                msg,
+                parse_mode=ParseMode.MARKDOWN
+            )
+            
+    except Exception as e:
+        logger.error(f"Error in userstats: {e}")
+        await update.message.reply_text("❌ Error fetching stats")
+    finally:
+        if conn:
+            return_db_connection(conn)
+
+# ========================================
 # ANTI-CHEAT ADMIN COMMANDS
 # ========================================
 
@@ -4229,6 +4439,13 @@ async def flaggedmatches(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not check_admin(str(update.effective_user.id)):
         await update.message.reply_text("❌ Unauthorized")
         return
+    
+    user = update.effective_user
+    await send_admin_log(
+        f"CMD: /flaggedmatches by {user.first_name} (@{user.username or 'no_username'}, ID: {user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
+    )
     
     try:
         conn = get_db_connection()
@@ -4285,6 +4502,13 @@ async def reviewmatch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not check_admin(str(update.effective_user.id)):
         await update.message.reply_text("❌ Unauthorized")
         return
+    
+    user = update.effective_user
+    await send_admin_log(
+        f"CMD: /reviewmatch by {user.first_name} (@{user.username or 'no_username'}, ID: {user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
+    )
     
     if not context.args or not context.args[0].isdigit():
         await update.message.reply_text(
@@ -4396,6 +4620,13 @@ async def clearflag(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Unauthorized")
         return
     
+    user = update.effective_user
+    await send_admin_log(
+        f"CMD: /clearflag by {user.first_name} (@{user.username or 'no_username'}, ID: {user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
+    )
+    
     if not context.args or not context.args[0].isdigit():
         await update.message.reply_text(
             "📋 *Usage:* `/clearflag <flag_id>`",
@@ -4463,6 +4694,13 @@ async def suspendrating(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Unauthorized")
         return
     
+    user = update.effective_user
+    await send_admin_log(
+        f"CMD: /suspendrating by {user.first_name} (@{user.username or 'no_username'}, ID: {user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
+    )
+    
     if not context.args:
         await update.message.reply_text(
             "📋 *Usage:* `/suspendrating <user_id> [reason]`",
@@ -4519,6 +4757,13 @@ async def unsuspendrating(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not check_admin(str(update.effective_user.id)):
         await update.message.reply_text("❌ Unauthorized")
         return
+    
+    user = update.effective_user
+    await send_admin_log(
+        f"CMD: /unsuspendrating by {user.first_name} (@{user.username or 'no_username'}, ID: {user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
+    )
     
     if not context.args:
         await update.message.reply_text(
@@ -4723,6 +4968,13 @@ async def add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Unauthorized")
         return
     
+    user = update.effective_user
+    await send_admin_log(
+        f"CMD: /addadmin by {user.first_name} (@{user.username or 'no_username'}, ID: {user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
+    )
+    
     admin_id = None
     
     # Check if replying to a message
@@ -4759,6 +5011,13 @@ async def stop_games(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not check_admin(str(update.effective_user.id)):
         await update.message.reply_text("❌ Unauthorized")
         return
+    
+    user = update.effective_user
+    await send_admin_log(
+        f"CMD: /stopgames by {user.first_name} (@{user.username or 'no_username'}, ID: {user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
+    )
     
     game_count = len(games)
     queue_count = len(ranked_queue)
@@ -5789,6 +6048,13 @@ async def test_db_connection(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if not check_admin(str(update.effective_user.id)):
             await update.message.reply_text("❌ Unauthorized")
             return
+        
+        user = update.effective_user
+        await send_admin_log(
+            f"CMD: /testdb by {user.first_name} (@{user.username or 'no_username'}, ID: {user.id})",
+            log_type="command",
+            chat_context=get_chat_context(update)
+        )
             
         try:
             connection = get_db_connection()
@@ -6081,6 +6347,13 @@ async def list_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not check_admin(str(update.effective_user.id)):
         await update.message.reply_text("❌ Unauthorized")
         return
+    
+    user = update.effective_user
+    await send_admin_log(
+        f"CMD: /listadmins by {user.first_name} (@{user.username or 'no_username'}, ID: {user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
+    )
         
     if not BOT_ADMINS:
         await update.message.reply_text(
@@ -6113,6 +6386,13 @@ async def remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not check_admin(str(update.effective_user.id)):
         await update.message.reply_text("❌ Unauthorized")
         return
+    
+    user = update.effective_user
+    await send_admin_log(
+        f"CMD: /removeadmin by {user.first_name} (@{user.username or 'no_username'}, ID: {user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
+    )
         
     if not context.args:
         await update.message.reply_text(
@@ -6148,6 +6428,13 @@ async def blacklist_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not check_admin(str(update.effective_user.id)):
         await update.message.reply_text("❌ Unauthorized")
         return
+    
+    user = update.effective_user
+    await send_admin_log(
+        f"CMD: /blacklist by {user.first_name} (@{user.username or 'no_username'}, ID: {user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
+    )
         
     if not context.args:
         await update.message.reply_text(
@@ -6206,6 +6493,13 @@ async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not check_admin(str(update.effective_user.id)):
         await update.message.reply_text("❌ Unauthorized")
         return
+    
+    user = update.effective_user
+    await send_admin_log(
+        f"CMD: /unban by {user.first_name} (@{user.username or 'no_username'}, ID: {user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
+    )
         
     if not context.args:
         await update.message.reply_text(
@@ -6262,6 +6556,13 @@ async def toggle_maintenance(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not check_admin(str(update.effective_user.id)):
         await update.message.reply_text("❌ Unauthorized")
         return
+    
+    user = update.effective_user
+    await send_admin_log(
+        f"CMD: /maintenance by {user.first_name} (@{user.username or 'no_username'}, ID: {user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
+    )
         
     global MAINTENANCE_MODE
     MAINTENANCE_MODE = not MAINTENANCE_MODE
@@ -8663,6 +8964,13 @@ async def reset_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not check_admin(str(update.effective_user.id)):
         await update.message.reply_text("❌ Unauthorized")
         return
+    
+    user = update.effective_user
+    await send_admin_log(
+        f"CMD: /resetstats by {user.first_name} (@{user.username or 'no_username'}, ID: {user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
+    )
         
     if not context.args:
         await update.message.reply_text(
@@ -9642,6 +9950,11 @@ def main():
     application.add_handler(CommandHandler("botstats", botstats))
     application.add_handler(CommandHandler("resetstats", reset_stats))
     application.add_handler(CommandHandler("testdb", test_db_connection))
+    
+    # User & group management commands
+    application.add_handler(CommandHandler("listusers", listusers))
+    application.add_handler(CommandHandler("listgroups", listgroups))
+    application.add_handler(CommandHandler("userstats", userstats))
     
     # Anti-cheat admin commands
     application.add_handler(CommandHandler("flaggedmatches", flaggedmatches))
