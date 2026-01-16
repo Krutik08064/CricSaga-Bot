@@ -680,6 +680,57 @@ async def track_group_membership(update: Update, context: ContextTypes.DEFAULT_T
     except Exception as e:
         logger.error(f"Error tracking group membership: {e}")
 
+async def auto_save_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Automatically save group info when any message/command is used in it.
+    This runs before every command to ensure groups are always tracked.
+    """
+    try:
+        # Only process groups and supergroups
+        if not update.effective_chat or update.effective_chat.type not in [ChatType.GROUP, ChatType.SUPERGROUP]:
+            return
+        
+        chat = update.effective_chat
+        user = update.effective_user
+        
+        conn = get_db_connection()
+        if not conn:
+            return
+        
+        try:
+            with conn.cursor() as cur:
+                # Save or update group
+                cur.execute("""
+                    INSERT INTO authorized_groups (group_id, group_name, added_by, is_active)
+                    VALUES (%s, %s, %s, TRUE)
+                    ON CONFLICT (group_id) DO UPDATE
+                    SET group_name = EXCLUDED.group_name,
+                        is_active = TRUE,
+                        updated_at = CURRENT_TIMESTAMP
+                    RETURNING (xmax = 0) AS is_new
+                """, (chat.id, chat.title or "Unknown Group", user.id if user else 0))
+                
+                result = cur.fetchone()
+                conn.commit()
+                
+                # Log only when new group is added
+                if result and result[0]:
+                    logger.info(f"✅ Auto-saved new group: {chat.title} (ID: {chat.id})")
+                    await send_admin_log(
+                        f"🟢 New group auto-detected\n"
+                        f"Group: {chat.title}\n"
+                        f"ID: {chat.id}\n"
+                        f"First used by: {user.first_name if user else 'Unknown'} (ID: {user.id if user else 'N/A'})",
+                        log_type="success",
+                        chat_context=f"GC: {chat.title} (ID: {chat.id})"
+                    )
+        finally:
+            if conn:
+                return_db_connection(conn)
+    
+    except Exception as e:
+        logger.error(f"Error auto-saving group: {e}")
+
 async def send_admin_log(message: str, log_type: str = "info", chat_context: str = None):
     """Send log message to admin chat via separate logging bot (non-blocking)
     
@@ -4451,7 +4502,7 @@ async def listgroups(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @check_blacklist()
 async def scangroups(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Scan and save all existing groups where bot is currently added"""
+    """Show instructions for auto-tracking groups"""
     if not check_admin(str(update.effective_user.id)):
         await update.message.reply_text("❌ Unauthorized")
         return
@@ -4463,109 +4514,42 @@ async def scangroups(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_context=get_chat_context(update)
     )
     
-    status_msg = await update.message.reply_text("🔍 Scanning for existing groups...")
-    
     try:
         conn = get_db_connection()
         if not conn:
-            await status_msg.edit_text("❌ Database connection error")
+            await update.message.reply_text("❌ Database connection error")
             return
         
-        groups_found = 0
-        groups_saved = 0
-        groups_updated = 0
-        
-        # Get bot instance
-        bot = context.bot
-        
-        # Method 1: Try to get updates from recent messages
-        try:
-            # Get recent updates (last 100)
-            updates = await bot.get_updates(limit=100)
+        with conn.cursor() as cur:
+            # Count active groups
+            cur.execute("SELECT COUNT(*) FROM authorized_groups WHERE is_active = TRUE")
+            active_count = cur.fetchone()[0]
             
-            for upd in updates:
-                try:
-                    if upd.message and upd.message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-                        chat = upd.message.chat
-                        groups_found += 1
-                        
-                        # Try to get bot's status in this group
-                        try:
-                            member = await bot.get_chat_member(chat.id, bot.id)
-                            if member.status in ['member', 'administrator']:
-                                with conn.cursor() as cur:
-                                    cur.execute("""
-                                        INSERT INTO authorized_groups (group_id, group_name, added_by, is_active)
-                                        VALUES (%s, %s, %s, TRUE)
-                                        ON CONFLICT (group_id) DO UPDATE
-                                        SET group_name = EXCLUDED.group_name,
-                                            is_active = TRUE,
-                                            added_at = CURRENT_TIMESTAMP
-                                        RETURNING (xmax = 0) AS inserted
-                                    """, (chat.id, chat.title or "Unknown Group", user.id))
-                                    
-                                    result = cur.fetchone()
-                                    if result and result[0]:
-                                        groups_saved += 1
-                                    else:
-                                        groups_updated += 1
-                                    
-                                    conn.commit()
-                                    logger.info(f"Saved group: {chat.title} (ID: {chat.id})")
-                        except Exception as member_error:
-                            logger.error(f"Error checking membership in {chat.id}: {member_error}")
-                            continue
-                            
-                except Exception as chat_error:
-                    logger.error(f"Error processing update chat: {chat_error}")
-                    continue
-                    
-        except Exception as updates_error:
-            logger.error(f"Error getting updates: {updates_error}")
+            # Count total groups
+            cur.execute("SELECT COUNT(*) FROM authorized_groups")
+            total_count = cur.fetchone()[0]
         
-        # If no groups found via updates, inform user about alternative method
-        if groups_found == 0:
-            await status_msg.edit_text(
-                "ℹ️ *Scan Complete*\n\n"
-                "No groups found in recent bot activity.\n\n"
-                "*To add existing groups:*\n"
-                "1. Send any message in each group\n"
-                "2. Run /scangroups again\n\n"
-                "*OR*\n"
-                "Remove and re-add bot to groups to auto-track them.",
-                parse_mode=ParseMode.MARKDOWN
-            )
-        else:
-            # Send results
-            result_msg = (
-                f"✅ *Group Scan Complete*\n\n"
-                f"📊 Results:\n"
-                f"• Groups Found: {groups_found}\n"
-                f"• New Groups Saved: {groups_saved}\n"
-                f"• Groups Updated: {groups_updated}\n\n"
-                f"_All groups will now appear in /listgroups and receive broadcasts_"
-            )
-            
-            await status_msg.edit_text(result_msg, parse_mode=ParseMode.MARKDOWN)
-            
-            # Log to admin
-            await send_admin_log(
-                f"📊 Group scan completed\n"
-                f"Found: {groups_found} | Saved: {groups_saved} | Updated: {groups_updated}\n"
-                f"By: {user.first_name} (ID: {user.id})",
-                log_type="success",
-                chat_context=get_chat_context(update)
-            )
-    
+        msg = (
+            "🔍 *GROUP AUTO-TRACKING*\n\n"
+            f"📊 Current Status:\n"
+            f"• Active Groups: {active_count}\n"
+            f"• Total Groups: {total_count}\n\n"
+            "✅ *Auto-Tracking Enabled*\n"
+            "Groups are automatically saved when:\n"
+            "• Anyone uses ANY command in the group\n"
+            "• Bot is added to new groups\n\n"
+            "💡 *To Register Existing Groups:*\n"
+            "1. Go to each group\n"
+            "2. Send ANY command (like /help)\n"
+            "3. Group is auto-saved instantly!\n\n"
+            "Use /listgroups to see all saved groups."
+        )
+        
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+        
     except Exception as e:
         logger.error(f"Error in scangroups: {e}")
-        await status_msg.edit_text(f"❌ Error scanning groups: {str(e)}")
-        await send_admin_log(
-            f"❌ Error in /scangroups: {str(e)}\n"
-            f"By: {user.first_name} (ID: {user.id})",
-            log_type="error",
-            chat_context=get_chat_context(update)
-        )
+        await update.message.reply_text("❌ Error checking groups")
     finally:
         if conn:
             return_db_connection(conn)
@@ -10077,6 +10061,15 @@ def main():
 
     # Load persistent data  
     load_persistent_data()
+    
+    # ===== AUTO-SAVE GROUPS MIDDLEWARE =====
+    # This runs before every update to auto-save groups
+    async def group_tracker_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Middleware to auto-save groups before processing commands"""
+        await auto_save_group(update, context)
+    
+    # Add as a pre-processor for all updates
+    application.add_handler(MessageHandler(filters.ALL, group_tracker_middleware), group=-1)
 
     # ===== GAME HANDLERS =====
     application.add_handler(CommandHandler("gameon", gameon))
