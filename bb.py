@@ -705,8 +705,7 @@ async def auto_save_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     VALUES (%s, %s, %s, TRUE)
                     ON CONFLICT (group_id) DO UPDATE
                     SET group_name = EXCLUDED.group_name,
-                        is_active = TRUE,
-                        updated_at = CURRENT_TIMESTAMP
+                        is_active = TRUE
                     RETURNING (xmax = 0) AS is_new
                 """, (chat.id, chat.title or "Unknown Group", user.id if user else 0))
                 
