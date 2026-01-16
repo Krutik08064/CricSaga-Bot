@@ -603,17 +603,45 @@ def is_connection_alive(connection):
     except (psycopg2.Error, AttributeError):
         return False
 
-async def send_admin_log(message: str):
-    """Send log message to admin chat via separate logging bot (non-blocking)"""
+async def send_admin_log(message: str, log_type: str = "info"):
+    """Send log message to admin chat via separate logging bot (non-blocking)
+    
+    Args:
+        message: The log message to send
+        log_type: Type of log - 'info', 'command', 'error', 'match', 'db_error'
+    """
     if not ADMIN_LOG_BOT_TOKEN or not ADMIN_LOG_CHAT_ID:
         return  # Logging not configured, skip silently
     
     try:
         import aiohttp
+        from datetime import datetime
+        
+        # Format message with bot name header and timestamp
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        
+        # Choose emoji based on log type
+        emoji_map = {
+            'info': 'ℹ️',
+            'command': '⚡',
+            'error': '❌',
+            'match': '🏏',
+            'db_error': '🔴',
+            'success': '✅'
+        }
+        emoji = emoji_map.get(log_type, 'ℹ️')
+        
+        # Format with clean structure
+        formatted_message = (
+            f"<b>CricSaga Bot</b>\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"{emoji} [{timestamp}] {message}"
+        )
+        
         url = f"https://api.telegram.org/bot{ADMIN_LOG_BOT_TOKEN}/sendMessage"
         payload = {
             'chat_id': ADMIN_LOG_CHAT_ID,
-            'text': message,
+            'text': formatted_message,
             'parse_mode': 'HTML',
             'disable_notification': True  # Silent notifications
         }
@@ -3219,7 +3247,10 @@ async def update_search_message(user_id: int, message, username: str, rating: in
         start_time = ranked_queue[user_id]['joined_at']
         
         # Log to admin
-        await send_admin_log(f"👤 {username} ({user_id}) joined ranked queue | Rating: {rating} ({rank_tier})")
+        await send_admin_log(
+            f"User: {username} | ID: {user_id} | Action: Joined ranked queue | Rating: {rating} ({rank_tier})",
+            log_type="match"
+        )
         
         while user_id in ranked_queue:
             elapsed = int(time.time() - start_time)
@@ -3534,9 +3565,56 @@ async def handle_game_end(query, game: dict, current_score: int, is_chase_succes
                 else:
                     winner = 1  # First batsman wins (defended score)
                 
-                # Calculate ELO changes based on batting order
+                # Get player stats for advanced rating calculation
+                player1_stats = await get_career_stats(str(player1_id))
+                player2_stats = await get_career_stats(str(player2_id))
+                first_batsman_stats = player1_stats if first_batsman_id == player1_id else player2_stats
+                second_batsman_stats = player2_stats if first_batsman_id == player1_id else player1_stats
+                
+                # Get dynamic K-factors based on each player's rank and match count
+                first_batsman_k = get_k_factor_by_rank(
+                    first_batsman_stats.get('rank_tier', 'Gold I'),
+                    first_batsman_stats.get('total_ranked_matches', 0)
+                )
+                second_batsman_k = get_k_factor_by_rank(
+                    second_batsman_stats.get('rank_tier', 'Gold I'),
+                    second_batsman_stats.get('total_ranked_matches', 0)
+                )
+                
+                # Calculate base ELO changes (using average K for calculation)
+                avg_k = (first_batsman_k + second_batsman_k) / 2
                 rating_change_first, rating_change_second = calculate_elo_change(
-                    first_batsman_rating, second_batsman_rating, winner, k_factor=32
+                    first_batsman_rating, second_batsman_rating, winner, k_factor=int(avg_k)
+                )
+                
+                # Apply individual K-factor adjustments
+                # Scale changes proportionally to each player's K-factor
+                if avg_k > 0:
+                    rating_change_first = int(rating_change_first * (first_batsman_k / avg_k))
+                    rating_change_second = int(rating_change_second * (second_batsman_k / avg_k))
+                
+                # Calculate win streak bonuses (flat additions, not multipliers)
+                first_streak_bonus = calculate_win_streak_bonus(
+                    first_batsman_stats.get('current_streak', 0),
+                    first_batsman_stats.get('rank_tier', 'Gold I'),
+                    winner == 1,
+                    first_batsman_stats.get('total_ranked_matches', 0)
+                )
+                second_streak_bonus = calculate_win_streak_bonus(
+                    second_batsman_stats.get('current_streak', 0),
+                    second_batsman_stats.get('rank_tier', 'Gold I'),
+                    winner == 2,
+                    second_batsman_stats.get('total_ranked_matches', 0)
+                )
+                
+                # Add streak bonuses to winners only (already returns 0 for losers)
+                rating_change_first += first_streak_bonus
+                rating_change_second += second_streak_bonus
+                
+                # Log advanced rating info
+                logger.info(
+                    f"Advanced Rating: P1 K={first_batsman_k} streak_bonus={first_streak_bonus} | "
+                    f"P2 K={second_batsman_k} streak_bonus={second_streak_bonus}"
                 )
                 
                 # Map rating changes back to creator/joiner for database storage
@@ -3635,44 +3713,88 @@ async def handle_game_end(query, game: dict, current_score: int, is_chase_succes
                             # Update player 1 rating with verification
                             new_rating_p1 = player1_rating + rating_change_p1
                             new_rank_p1 = get_rank_from_rating(new_rating_p1)
+                            
+                            # Update win streak for player 1
+                            # Get current stats for player 1 (reuse from earlier fetch)
+                            p1_current_stats = player1_stats
+                            if winner == 1:
+                                # Winner: increment streak
+                                new_streak_p1 = p1_current_stats.get('current_streak', 0) + 1
+                                streak_type_p1 = 'win'
+                            else:
+                                # Loser: reset streak
+                                new_streak_p1 = 0
+                                streak_type_p1 = 'none'
+                            
                             cur.execute("""
                                 UPDATE career_stats 
                                 SET rating = rating + %s,
                                     rank_tier = %s,
                                     username = %s,
                                     total_matches = total_matches + 1,
+                                    total_ranked_matches = total_ranked_matches + 1,
                                     wins = wins + %s,
                                     losses = losses + %s,
+                                    current_streak = %s,
+                                    streak_type = %s,
                                     updated_at = CURRENT_TIMESTAMP
                                 WHERE user_id = %s
-                                RETURNING user_id, rating, total_matches, wins, losses
-                            """, (rating_change_p1, new_rank_p1, game['creator_name'], 1 if winner == 1 else 0, 1 if winner == 2 else 0, player1_id))
+                                RETURNING user_id, rating, total_matches, wins, losses, current_streak
+                            """, (rating_change_p1, new_rank_p1, game['creator_name'], 
+                                  1 if winner == 1 else 0, 1 if winner == 2 else 0,
+                                  new_streak_p1, streak_type_p1, player1_id))
                             p1_result = cur.fetchone()
                             if not p1_result:
                                 logger.error(f"❌ Failed to update stats for player1_id={player1_id}")
+                                await send_admin_log(
+                                    f"DB ERROR: Failed to update stats for user {game['creator_name']} (ID: {player1_id}) in match #{match_id}",
+                                    log_type="db_error"
+                                )
                             else:
-                                logger.info(f"✅ P1 updated: rating={p1_result[1]}, matches={p1_result[2]}, wins={p1_result[3]}")
+                                logger.info(f"✅ P1 updated: rating={p1_result[1]}, matches={p1_result[2]}, wins={p1_result[3]}, streak={p1_result[5]}")
                             
                             # Update player 2 rating with verification
                             new_rating_p2 = player2_rating + rating_change_p2
                             new_rank_p2 = get_rank_from_rating(new_rating_p2)
+                            
+                            # Update win streak for player 2
+                            # Get current stats for player 2 (reuse from earlier fetch)
+                            p2_current_stats = player2_stats
+                            if winner == 2:
+                                # Winner: increment streak
+                                new_streak_p2 = p2_current_stats.get('current_streak', 0) + 1
+                                streak_type_p2 = 'win'
+                            else:
+                                # Loser: reset streak
+                                new_streak_p2 = 0
+                                streak_type_p2 = 'none'
+                            
                             cur.execute("""
                                 UPDATE career_stats 
                                 SET rating = rating + %s,
                                     rank_tier = %s,
                                     username = %s,
                                     total_matches = total_matches + 1,
+                                    total_ranked_matches = total_ranked_matches + 1,
                                     wins = wins + %s,
                                     losses = losses + %s,
+                                    current_streak = %s,
+                                    streak_type = %s,
                                     updated_at = CURRENT_TIMESTAMP
                                 WHERE user_id = %s
-                                RETURNING user_id, rating, total_matches, wins, losses
-                            """, (rating_change_p2, new_rank_p2, game['joiner_name'], 1 if winner == 2 else 0, 1 if winner == 1 else 0, player2_id))
+                                RETURNING user_id, rating, total_matches, wins, losses, current_streak
+                            """, (rating_change_p2, new_rank_p2, game['joiner_name'],
+                                  1 if winner == 2 else 0, 1 if winner == 1 else 0,
+                                  new_streak_p2, streak_type_p2, player2_id))
                             p2_result = cur.fetchone()
                             if not p2_result:
                                 logger.error(f"❌ Failed to update stats for player2_id={player2_id}")
+                                await send_admin_log(
+                                    f"DB ERROR: Failed to update stats for user {game['joiner_name']} (ID: {player2_id}) in match #{match_id}",
+                                    log_type="db_error"
+                                )
                             else:
-                                logger.info(f"✅ P2 updated: rating={p2_result[1]}, matches={p2_result[2]}, wins={p2_result[3]}")
+                                logger.info(f"✅ P2 updated: rating={p2_result[1]}, matches={p2_result[2]}, wins={p2_result[3]}, streak={p2_result[5]}")
                             
                             # Save to ranked_matches table
                             cur.execute("""
@@ -3707,6 +3829,10 @@ async def handle_game_end(query, game: dict, current_score: int, is_chase_succes
                             
                     except Exception as db_error:
                         logger.error(f"Database update error: {db_error}", exc_info=True)
+                        await send_admin_log(
+                            f"DB ERROR: Failed to save match #{match_id} results | Error: {str(db_error)[:100]}",
+                            log_type="db_error"
+                        )
                     finally:
                         if conn:
                             return_db_connection(conn)
@@ -3741,10 +3867,11 @@ async def handle_game_end(query, game: dict, current_score: int, is_chase_succes
                     
                     # Log match result to admin
                     await send_admin_log(
-                        f"🏆 Match #{match_id} Complete | Winner: {winner_name} | "
-                        f"Scores: {game['score']['innings1']} vs {game['score']['innings2']} | "
-                        f"Ratings: {winner_name} {winner_old}→{winner_new} ({winner_change:+d}), "
-                        f"{loser_name} {loser_old}→{loser_new} ({loser_change:+d})"
+                        f"Match #{match_id} Complete | Winner: {winner_name} | "
+                        f"Score: {game['score']['innings1']}-{game['score']['innings2']} | "
+                        f"{winner_name}: {winner_old}→{winner_new} ({winner_change:+d}) | "
+                        f"{loser_name}: {loser_old}→{loser_new} ({loser_change:+d})",
+                        log_type="match"
                     )
                     
                     # Tag users
@@ -4430,6 +4557,12 @@ async def unsuspendrating(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     
+    # Log command usage
+    await send_admin_log(
+        f"User: {user.first_name} (@{user.username or 'no_username'}) | ID: {user.id} | Command: /start",
+        log_type="command"
+    )
+    
     # Check if user is member of required channels
     is_member, not_joined = await check_user_membership(user.id, context)
     
@@ -4526,6 +4659,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @require_subscription
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Display comprehensive help information"""
+    user = update.effective_user
+    await send_admin_log(
+        f"User: {user.first_name} (@{user.username or 'no_username'}) | ID: {user.id} | Command: /help",
+        log_type="command"
+    )
+    
     help_text = (
         "🏏 *CRICSAGA COMMANDS*\n"
         "━━━━━━━━━━━━━━━━\n\n"
@@ -5801,6 +5940,70 @@ def safe_division(numerator, denominator, default=0):
         return default
 
 # ===== PHASE 2: ELO RATING SYSTEM =====
+def get_k_factor_by_rank(rank_tier: str, total_ranked_matches: int) -> int:
+    """
+    Determine K-factor based on player's rank and placement status.
+    
+    Args:
+        rank_tier: Player's current rank (e.g., 'Bronze I', 'Diamond III')
+        total_ranked_matches: Total ranked matches played
+    
+    Returns:
+        K-factor (16-48)
+    """
+    # Placement matches (first 5 games) - highest K for fast calibration
+    if total_ranked_matches < 5:
+        return 48
+    
+    # Extract rank tier (Bronze, Silver, Gold, etc.)
+    rank_lower = rank_tier.lower()
+    
+    # Dynamic K-factor by rank
+    if 'bronze' in rank_lower or 'silver' in rank_lower:
+        return 40  # New players climb faster
+    elif 'gold' in rank_lower or 'platinum' in rank_lower:
+        return 32  # Standard competitive rate
+    elif 'diamond' in rank_lower or 'ruby' in rank_lower:
+        return 24  # High ranks stabilize
+    elif 'immortal' in rank_lower:
+        return 16  # Top ranks are very stable
+    else:
+        return 32  # Default fallback
+
+def calculate_win_streak_bonus(current_streak: int, rank_tier: str, is_winner: bool, total_ranked_matches: int) -> int:
+    """
+    Calculate flat bonus for win streaks.
+    
+    Args:
+        current_streak: Player's current win streak (0+)
+        rank_tier: Player's current rank
+        is_winner: Whether player won this match
+        total_ranked_matches: Total ranked matches played
+    
+    Returns:
+        Flat bonus to add to rating change (0-4)
+    """
+    # No bonus if not a win
+    if not is_winner:
+        return 0
+    
+    # No bonus during placement matches
+    if total_ranked_matches < 5:
+        return 0
+    
+    # No bonus for Platinum+ ranks
+    rank_lower = rank_tier.lower()
+    if 'platinum' in rank_lower or 'diamond' in rank_lower or 'ruby' in rank_lower or 'immortal' in rank_lower:
+        return 0
+    
+    # Calculate flat bonus based on streak
+    if current_streak >= 5:
+        return 4  # Max bonus at 5+ streak
+    elif current_streak >= 3:
+        return 2  # Small bonus at 3-4 streak
+    else:
+        return 0  # No bonus yet
+
 def calculate_elo_change(rating1: int, rating2: int, winner: int, k_factor: int = 32) -> tuple:
     """
     Calculate ELO rating changes for both players.
@@ -5809,7 +6012,7 @@ def calculate_elo_change(rating1: int, rating2: int, winner: int, k_factor: int 
         rating1: Player 1's current rating
         rating2: Player 2's current rating
         winner: 1 if player1 wins, 2 if player2 wins, 0 if draw
-        k_factor: Maximum rating change (32 is standard, 40 for new players)
+        k_factor: Maximum rating change (dynamic by rank, 16-48)
     
     Returns:
         Tuple of (player1_change, player2_change)
@@ -6153,12 +6356,17 @@ async def get_player_stats(user_id: str) -> dict:
         if conn:
             return_db_connection(conn)
 
-# Update the profile function to handle null values
 @require_subscription
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show enhanced player profile with improved UI"""
     user_id = str(update.effective_user.id)
     user_name = update.effective_user.first_name
+    user = update.effective_user
+    
+    await send_admin_log(
+        f"User: {user_name} (@{user.username or 'no_username'}) | ID: {user_id} | Command: /profile",
+        log_type="command"
+    )
     
     try:
         stats = await get_player_stats(user_id)
@@ -6580,6 +6788,7 @@ async def update_career_stats(winner_id: str, loser_id: str, winner_gain: int, l
 async def save_ranked_match(game: dict, winner_id: str, loser_id: str, 
                             winner_gain: int, loser_loss: int, performance_bonus: int) -> bool:
     """Save ranked match history"""
+    conn = None
     try:
         conn = get_db_connection()
         if not conn:
@@ -6634,7 +6843,7 @@ async def save_ranked_match(game: dict, winner_id: str, loser_id: str,
             
             conn.commit()
             return True
-            
+    
     except Exception as e:
         logger.error(f"Error saving ranked match: {e}")
         return False
@@ -6647,6 +6856,12 @@ async def career(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show player career/ranking profile"""
     user_id = str(update.effective_user.id)
     username = update.effective_user.first_name or "Player"
+    user = update.effective_user
+    
+    await send_admin_log(
+        f"User: {username} (@{user.username or 'no_username'}) | ID: {user_id} | Command: /career",
+        log_type="command"
+    )
     
     try:
         # Get career stats
@@ -7060,6 +7275,12 @@ async def handle_rankedinfo_pagination(update: Update, context: ContextTypes.DEF
 async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show top players ranked by rating"""
     user_id = str(update.effective_user.id)
+    user = update.effective_user
+    
+    await send_admin_log(
+        f"User: {user.first_name} (@{user.username or 'no_username'}) | ID: {user_id} | Command: /leaderboard",
+        log_type="command"
+    )
     
     try:
         conn = get_db_connection()
@@ -7278,6 +7499,12 @@ async def ranked(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     username = update.effective_user.first_name or "Player"
     chat_id = update.effective_chat.id
+    user = update.effective_user
+    
+    await send_admin_log(
+        f"User: {username} (@{user.username or 'no_username'}) | ID: {user_id} | Command: /ranked",
+        log_type="command"
+    )
     
     try:
         # Check if user is already in a game
@@ -7457,8 +7684,8 @@ async def ranked(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if match_id:
                 # Log match start to admin
                 await send_admin_log(
-                    f"🏏 Match #{match_id} Started | "
-                    f"{username} ({rating}) vs {opponent['username']} ({opponent['rating']})"
+                    f"Match #{match_id} Started | Players: {username} ({rating}) vs {opponent['username']} ({opponent['rating']})",
+                    log_type="match"
                 )
                 
                 # Start the toss
@@ -7529,6 +7756,10 @@ async def ranked(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 logger.info(f"🎮 Ranked match started: {match_id}")
             else:
+                await send_admin_log(
+                    f"ERROR: Ranked match creation failed for {username} (ID: {user_id}) vs {opponent['username']} (ID: {opponent['user_id']})",
+                    log_type="error"
+                )
                 await search_message.edit_text(
                     "❌ *Error*\n"
                     "Failed to create ranked match\\. Please try again\\.",
