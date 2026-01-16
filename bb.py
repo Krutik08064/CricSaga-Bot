@@ -603,6 +603,83 @@ def is_connection_alive(connection):
     except (psycopg2.Error, AttributeError):
         return False
 
+async def track_group_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Track when bot is added to or removed from groups.
+    Automatically saves group info to database.
+    """
+    try:
+        my_chat_member = update.my_chat_member
+        if not my_chat_member:
+            return
+        
+        chat = my_chat_member.chat
+        new_status = my_chat_member.new_chat_member.status
+        old_status = my_chat_member.old_chat_member.status
+        
+        # Only track groups and supergroups
+        if chat.type not in [ChatType.GROUP, ChatType.SUPERGROUP]:
+            return
+        
+        conn = get_db_connection()
+        if not conn:
+            return
+        
+        try:
+            with conn.cursor() as cur:
+                # Bot was added to group
+                if new_status in ['member', 'administrator'] and old_status in ['left', 'kicked']:
+                    # Save group to database
+                    cur.execute("""
+                        INSERT INTO authorized_groups (group_id, group_name, added_by, is_active)
+                        VALUES (%s, %s, %s, TRUE)
+                        ON CONFLICT (group_id) DO UPDATE
+                        SET group_name = EXCLUDED.group_name,
+                            is_active = TRUE,
+                            added_at = CURRENT_TIMESTAMP
+                    """, (chat.id, chat.title or "Unknown Group", my_chat_member.from_user.id))
+                    conn.commit()
+                    
+                    logger.info(f"✅ Bot added to group: {chat.title} (ID: {chat.id})")
+                    
+                    # Send notification to admin log
+                    await send_admin_log(
+                        f"🟢 Bot added to group\n"
+                        f"Group: {chat.title}\n"
+                        f"ID: {chat.id}\n"
+                        f"Added by: {my_chat_member.from_user.first_name} (ID: {my_chat_member.from_user.id})",
+                        log_type="success",
+                        chat_context=f"GC: {chat.title} (ID: {chat.id})"
+                    )
+                
+                # Bot was removed from group
+                elif new_status in ['left', 'kicked'] and old_status in ['member', 'administrator']:
+                    # Mark group as inactive
+                    cur.execute("""
+                        UPDATE authorized_groups 
+                        SET is_active = FALSE
+                        WHERE group_id = %s
+                    """, (chat.id,))
+                    conn.commit()
+                    
+                    logger.info(f"❌ Bot removed from group: {chat.title} (ID: {chat.id})")
+                    
+                    # Send notification to admin log
+                    await send_admin_log(
+                        f"🔴 Bot removed from group\n"
+                        f"Group: {chat.title}\n"
+                        f"ID: {chat.id}",
+                        log_type="warning",
+                        chat_context=f"GC: {chat.title} (ID: {chat.id})"
+                    )
+        
+        finally:
+            if conn:
+                return_db_connection(conn)
+    
+    except Exception as e:
+        logger.error(f"Error tracking group membership: {e}")
+
 async def send_admin_log(message: str, log_type: str = "info", chat_context: str = None):
     """Send log message to admin chat via separate logging bot (non-blocking)
     
@@ -4280,14 +4357,18 @@ async def listusers(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg = f"👥 *REGISTERED USERS* ({total_users} total)\n"
             msg += "━━━━━━━━━━━━━━━━\n\n"
             
-            for i, user in enumerate(users, 1):
-                user_id, username, first_name, rating, rank, matches = user
+            for i, user_data in enumerate(users, 1):
+                user_id, username, first_name, rating, rank, matches = user_data
+                
+                # Escape special characters for Markdown
+                first_name_safe = first_name.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`') if first_name else "Unknown"
                 username_str = f"@{username}" if username else "No username"
                 rating_str = f"{rating} ({rank})" if rating else "Not ranked"
                 matches_str = f"{matches}M" if matches else "0M"
                 
-                msg += f"{i}. {first_name} ({username_str})\n"
-                msg += f"   ID: `{user_id}` | {rating_str} | {matches_str}\n\n"
+                msg += f"{i}. {first_name_safe}\n"
+                msg += f"   {username_str} | ID: `{user_id}`\n"
+                msg += f"   {rating_str} | Matches: {matches_str}\n\n"
             
             if total_users > 20:
                 msg += f"\n_Showing top 20 of {total_users} users_"
@@ -4364,6 +4445,127 @@ async def listgroups(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error in listgroups: {e}")
         await update.message.reply_text("❌ Error fetching groups")
+    finally:
+        if conn:
+            return_db_connection(conn)
+
+@check_blacklist()
+async def scangroups(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Scan and save all existing groups where bot is currently added"""
+    if not check_admin(str(update.effective_user.id)):
+        await update.message.reply_text("❌ Unauthorized")
+        return
+    
+    user = update.effective_user
+    await send_admin_log(
+        f"CMD: /scangroups by {user.first_name} (@{user.username or 'no_username'}, ID: {user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
+    )
+    
+    status_msg = await update.message.reply_text("🔍 Scanning for existing groups...")
+    
+    try:
+        conn = get_db_connection()
+        if not conn:
+            await status_msg.edit_text("❌ Database connection error")
+            return
+        
+        groups_found = 0
+        groups_saved = 0
+        groups_updated = 0
+        
+        # Get bot instance
+        bot = context.bot
+        
+        # Method 1: Try to get updates from recent messages
+        try:
+            # Get recent updates (last 100)
+            updates = await bot.get_updates(limit=100)
+            
+            for upd in updates:
+                try:
+                    if upd.message and upd.message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+                        chat = upd.message.chat
+                        groups_found += 1
+                        
+                        # Try to get bot's status in this group
+                        try:
+                            member = await bot.get_chat_member(chat.id, bot.id)
+                            if member.status in ['member', 'administrator']:
+                                with conn.cursor() as cur:
+                                    cur.execute("""
+                                        INSERT INTO authorized_groups (group_id, group_name, added_by, is_active)
+                                        VALUES (%s, %s, %s, TRUE)
+                                        ON CONFLICT (group_id) DO UPDATE
+                                        SET group_name = EXCLUDED.group_name,
+                                            is_active = TRUE,
+                                            added_at = CURRENT_TIMESTAMP
+                                        RETURNING (xmax = 0) AS inserted
+                                    """, (chat.id, chat.title or "Unknown Group", user.id))
+                                    
+                                    result = cur.fetchone()
+                                    if result and result[0]:
+                                        groups_saved += 1
+                                    else:
+                                        groups_updated += 1
+                                    
+                                    conn.commit()
+                                    logger.info(f"Saved group: {chat.title} (ID: {chat.id})")
+                        except Exception as member_error:
+                            logger.error(f"Error checking membership in {chat.id}: {member_error}")
+                            continue
+                            
+                except Exception as chat_error:
+                    logger.error(f"Error processing update chat: {chat_error}")
+                    continue
+                    
+        except Exception as updates_error:
+            logger.error(f"Error getting updates: {updates_error}")
+        
+        # If no groups found via updates, inform user about alternative method
+        if groups_found == 0:
+            await status_msg.edit_text(
+                "ℹ️ *Scan Complete*\n\n"
+                "No groups found in recent bot activity.\n\n"
+                "*To add existing groups:*\n"
+                "1. Send any message in each group\n"
+                "2. Run /scangroups again\n\n"
+                "*OR*\n"
+                "Remove and re-add bot to groups to auto-track them.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        else:
+            # Send results
+            result_msg = (
+                f"✅ *Group Scan Complete*\n\n"
+                f"📊 Results:\n"
+                f"• Groups Found: {groups_found}\n"
+                f"• New Groups Saved: {groups_saved}\n"
+                f"• Groups Updated: {groups_updated}\n\n"
+                f"_All groups will now appear in /listgroups and receive broadcasts_"
+            )
+            
+            await status_msg.edit_text(result_msg, parse_mode=ParseMode.MARKDOWN)
+            
+            # Log to admin
+            await send_admin_log(
+                f"📊 Group scan completed\n"
+                f"Found: {groups_found} | Saved: {groups_saved} | Updated: {groups_updated}\n"
+                f"By: {user.first_name} (ID: {user.id})",
+                log_type="success",
+                chat_context=get_chat_context(update)
+            )
+    
+    except Exception as e:
+        logger.error(f"Error in scangroups: {e}")
+        await status_msg.edit_text(f"❌ Error scanning groups: {str(e)}")
+        await send_admin_log(
+            f"❌ Error in /scangroups: {str(e)}\n"
+            f"By: {user.first_name} (ID: {user.id})",
+            log_type="error",
+            chat_context=get_chat_context(update)
+        )
     finally:
         if conn:
             return_db_connection(conn)
@@ -9938,6 +10140,11 @@ def main():
         handle_team_name_input
     ))
     
+    # ===== GROUP TRACKING =====
+    # Track when bot is added/removed from groups
+    from telegram.ext import ChatMemberHandler
+    application.add_handler(ChatMemberHandler(track_group_membership, ChatMemberHandler.MY_CHAT_MEMBER))
+    
     # ===== ADMIN COMMANDS =====
     application.add_handler(CommandHandler("addadmin", add_admin))
     application.add_handler(CommandHandler("removeadmin", remove_admin))
@@ -9954,6 +10161,7 @@ def main():
     # User & group management commands
     application.add_handler(CommandHandler("listusers", listusers))
     application.add_handler(CommandHandler("listgroups", listgroups))
+    application.add_handler(CommandHandler("scangroups", scangroups))
     application.add_handler(CommandHandler("userstats", userstats))
     
     # Anti-cheat admin commands
