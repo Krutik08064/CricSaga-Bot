@@ -7091,7 +7091,7 @@ async def add_challenge_cooldown(challenger_id: int, target_id: int, cooldown_mi
             return_db_connection(conn)
 
 async def is_player_available(user_id: int) -> bool:
-    """Check if player is available for a challenge (not in game or queue)"""
+    """Check if player is available for a challenge (not in game, queue, or has pending challenges)"""
     # Check if in active game
     for game in games.values():
         if game.get('creator') == user_id or game.get('joiner') == user_id:
@@ -7100,6 +7100,27 @@ async def is_player_available(user_id: int) -> bool:
     # Check if in ranked queue
     if user_id in ranked_queue:
         return False
+    
+    # Check if has pending challenges in database
+    try:
+        conn = get_db_connection()
+        if conn:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT COUNT(*) FROM pending_challenges
+                        WHERE (challenger_id = %s OR target_id = %s)
+                        AND status = 'pending'
+                        AND expires_at > NOW()
+                    """, (user_id, user_id))
+                    count = cur.fetchone()[0]
+                    if count > 0:
+                        return False
+            finally:
+                return_db_connection(conn)
+    except Exception as e:
+        logger.error(f"Error checking pending challenges: {e}")
+        # On error, continue with the check (fail open)
     
     return True
 
@@ -7123,7 +7144,7 @@ async def get_career_stats(user_id: str) -> dict:
                 cur.execute("""
                     INSERT INTO career_stats 
                         (user_id, username, rating, rank_tier, total_matches, wins, losses)
-                    VALUES (%s, '', 1000, 'Gold I', 0, 0, 0)
+                    VALUES (%s, '', 1000, 'Silver III', 0, 0, 0)
                     RETURNING *
                 """, (user_id,))
                 conn.commit()
