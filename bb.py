@@ -456,6 +456,20 @@ async def cleanup_old_games():
                 if now - user_queue_cooldown[user_id] > 600:  # 10 minutes
                     del user_queue_cooldown[user_id]
             
+            # Cleanup stale ranked_queue entries (older than 5 minutes)
+            stale_queue = []
+            for user_id, queue_entry in list(ranked_queue.items()):
+                if now - queue_entry.get('joined_at', now) > 300:  # 5 minutes
+                    stale_queue.append(user_id)
+            
+            for user_id in stale_queue:
+                logger.info(f"🧹 Cleaning stale ranked queue entry for user {user_id}")
+                del ranked_queue[user_id]
+                # Also cancel any search tasks
+                if user_id in queue_search_tasks:
+                    queue_search_tasks[user_id].cancel()
+                    del queue_search_tasks[user_id]
+            
             # Cleanup old user click tracking
             for user_id in list(user_last_click.keys()):
                 if now - user_last_click[user_id] > 600:  # 10 minutes
@@ -463,6 +477,8 @@ async def cleanup_old_games():
                     
             if stale_games:
                 logger.info(f"Cleaned up {len(stale_games)} stale games")
+            if stale_queue:
+                logger.info(f"Cleaned up {len(stale_queue)} stale queue entries")
                 
         except Exception as e:
             logger.error(f"Error in cleanup task: {e}")
@@ -5218,6 +5234,131 @@ async def stop_games(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.MARKDOWN_V2
     )
 
+async def force_remove_player(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to forcefully remove a player from queue/matches/challenges"""
+    if not check_admin(str(update.effective_user.id)):
+        await update.message.reply_text("❌ Unauthorized")
+        return
+    
+    admin_user = update.effective_user
+    await send_admin_log(
+        f"CMD: /forceremove by {admin_user.first_name} (@{admin_user.username or 'no_username'}, ID: {admin_user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
+    )
+    
+    # Check args
+    if not context.args:
+        await update.message.reply_text(
+            "📋 *FORCE REMOVE PLAYER*\n"
+            "━━━━━━━━━━━━━━━━\n\n"
+            "*Usage:*\n"
+            "`/forceremove <user_id>`\n\n"
+            "*Example:*\n"
+            "`/forceremove 123456789`\n\n"
+            "This will remove the player from:\n"
+            "• Ranked queue\n"
+            "• Active games\n"
+            "• Pending challenges\n"
+            "• Challenge cooldowns",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+        return
+    
+    try:
+        target_user_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Invalid user ID\! Must be a number\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+        return
+    
+    removed_items = []
+    
+    # 1. Remove from ranked queue
+    if target_user_id in ranked_queue:
+        username = ranked_queue[target_user_id].get('username', 'Unknown')
+        await remove_from_ranked_queue(target_user_id)
+        removed_items.append(f"Ranked queue ({username})")
+        logger.info(f"👮 Admin force-removed {username} (ID: {target_user_id}) from ranked queue")
+    
+    # 2. Remove from active games
+    games_removed = 0
+    for game_id, game in list(games.items()):
+        if game.get('creator') == target_user_id or game.get('joiner') == target_user_id:
+            del games[game_id]
+            games_removed += 1
+    if games_removed > 0:
+        removed_items.append(f"{games_removed} active game(s)")
+        logger.info(f"👮 Admin force-removed user {target_user_id} from {games_removed} active game(s)")
+    
+    # 3. Remove pending challenges (as challenger or target)
+    try:
+        conn = get_db_connection()
+        if conn:
+            try:
+                with conn.cursor() as cur:
+                    # Count pending challenges
+                    cur.execute("""
+                        SELECT COUNT(*) FROM pending_challenges
+                        WHERE (challenger_id = %s OR target_id = %s)
+                        AND status = 'pending'
+                    """, (target_user_id, target_user_id))
+                    challenges_count = cur.fetchone()[0]
+                    
+                    if challenges_count > 0:
+                        # Delete pending challenges
+                        cur.execute("""
+                            DELETE FROM pending_challenges
+                            WHERE (challenger_id = %s OR target_id = %s)
+                            AND status = 'pending'
+                        """, (target_user_id, target_user_id))
+                        conn.commit()
+                        removed_items.append(f"{challenges_count} pending challenge(s)")
+                        logger.info(f"👮 Admin force-removed {challenges_count} pending challenges for user {target_user_id}")
+                    
+                    # 4. Clear challenge cooldowns
+                    cur.execute("""
+                        DELETE FROM challenge_cooldowns
+                        WHERE challenger_id = %s OR target_id = %s
+                    """, (target_user_id, target_user_id))
+                    cooldowns_removed = cur.rowcount
+                    if cooldowns_removed > 0:
+                        conn.commit()
+                        removed_items.append(f"{cooldowns_removed} cooldown(s)")
+                        logger.info(f"👮 Admin cleared {cooldowns_removed} challenge cooldowns for user {target_user_id}")
+                        
+            finally:
+                return_db_connection(conn)
+    except Exception as e:
+        logger.error(f"Error removing challenges/cooldowns: {e}")
+    
+    # Send result
+    if removed_items:
+        items_list = "\n".join([f"• {item}" for item in removed_items])
+        result_msg = (
+            f"✅ *PLAYER FORCEFULLY REMOVED*\n"
+            f"━━━━━━━━━━━━━━━━\n\n"
+            f"*User ID:* `{target_user_id}`\n\n"
+            f"*Removed from:*\n"
+            f"{escape_markdown_v2_custom(items_list)}"
+        )
+        await send_admin_log(
+            f"✅ Force-removed user {target_user_id}\n" + "\n".join(removed_items),
+            log_type="success",
+            chat_context=get_chat_context(update)
+        )
+    else:
+        result_msg = (
+            f"ℹ️ *NO ACTION NEEDED*\n"
+            f"━━━━━━━━━━━━━━━━\n\n"
+            f"*User ID:* `{target_user_id}`\n\n"
+            f"Player is not in any queue, match, or challenge\."
+        )
+    
+    await update.message.reply_text(result_msg, parse_mode=ParseMode.MARKDOWN_V2)
+
 # --- Scorecard Functions ---
 # Add save_match function improvements
 @require_subscription
@@ -7091,37 +7232,24 @@ async def add_challenge_cooldown(challenger_id: int, target_id: int, cooldown_mi
             return_db_connection(conn)
 
 async def is_player_available(user_id: int) -> bool:
-    """Check if player is available for a challenge (not in game, queue, or has pending challenges)"""
+    """Check if player is available for a challenge (not in active game or queue)"""
     # Check if in active game
     for game in games.values():
         if game.get('creator') == user_id or game.get('joiner') == user_id:
             return False
     
-    # Check if in ranked queue
+    # Check if in ranked queue AND clean up stale entries
     if user_id in ranked_queue:
+        queue_entry = ranked_queue[user_id]
+        # Check if entry is stale (older than 5 minutes)
+        if time.time() - queue_entry.get('joined_at', 0) > 300:
+            # Remove stale entry
+            logger.warning(f"🧹 Cleaning stale queue entry for user {user_id}")
+            del ranked_queue[user_id]
+            return True
         return False
     
-    # Check if has pending challenges in database
-    try:
-        conn = get_db_connection()
-        if conn:
-            try:
-                with conn.cursor() as cur:
-                    cur.execute("""
-                        SELECT COUNT(*) FROM pending_challenges
-                        WHERE (challenger_id = %s OR target_id = %s)
-                        AND status = 'pending'
-                        AND expires_at > NOW()
-                    """, (user_id, user_id))
-                    count = cur.fetchone()[0]
-                    if count > 0:
-                        return False
-            finally:
-                return_db_connection(conn)
-    except Exception as e:
-        logger.error(f"Error checking pending challenges: {e}")
-        # On error, continue with the check (fail open)
-    
+    # Don't check pending challenges - having a challenge shouldn't block playing
     return True
 
 async def get_career_stats(user_id: str) -> dict:
@@ -8635,20 +8763,6 @@ async def challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        # Check cooldown (5 minutes)
-        cooldown_remaining = await check_challenge_cooldown(user_id, target_id)
-        if cooldown_remaining > 0:
-            minutes = cooldown_remaining // 60
-            seconds = cooldown_remaining % 60
-            await update.message.reply_text(
-                f"⏳ *CHALLENGE COOLDOWN*\n"
-                f"━━━━━━━━━━━━━━━━\n\n"
-                f"You can challenge {escape_markdown_v2_custom(target_name)} again in:\n\n"
-                f"*{minutes}m {seconds}s*",
-                parse_mode=ParseMode.MARKDOWN_V2
-            )
-            return
-        
         # Check if both players are available
         if not await is_player_available(user_id):
             await update.message.reply_text(
@@ -8670,9 +8784,6 @@ async def challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Create challenge ID
         challenge_id = f"CH{random.randint(1000, 9999)}"
-        
-        # Add cooldown
-        await add_challenge_cooldown(user_id, target_id)
         
         # Store challenge in database
         try:
@@ -10166,6 +10277,7 @@ def main():
     application.add_handler(CommandHandler("unban", unban_user))
     application.add_handler(CommandHandler("broadcast", broadcast_message))
     application.add_handler(CommandHandler("stopgames", stop_games))
+    application.add_handler(CommandHandler("forceremove", force_remove_player))
     application.add_handler(CommandHandler("maintenance", toggle_maintenance))
     application.add_handler(CommandHandler("botstats", botstats))
     application.add_handler(CommandHandler("resetstats", reset_stats))
