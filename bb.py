@@ -3370,7 +3370,7 @@ async def create_ranked_match(player1_data: dict, player2_data: dict, chat_id: i
             'joiner_name': player2_data['username'],
             'status': 'toss',
             'chat_id': chat_id,
-            'mode': 'survival',  # Ranked matches are always survival mode (1 wicket, unlimited overs)
+            'mode': 'blitz',  # Ranked matches use Blitz mode (3 wickets, 3 overs)
             'max_wickets': 3,
             'max_overs': 3,
             'ranked_match': True,  # CRITICAL FLAG: Marks this as a rated match
@@ -9034,9 +9034,9 @@ async def handle_challenge_accept(update: Update, context: ContextTypes.DEFAULT_
         'match_type': 'ranked',
         'is_ranked': True,
         'status': 'playing',
-        'mode': 'Survival',
-        'max_overs': 999,
-        'max_wickets': 1,
+        'mode': 'Blitz',
+        'max_overs': 3,
+        'max_wickets': 3,
         'overs': 3,
         'wickets': 0,
         'balls': 0,
