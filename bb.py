@@ -5452,6 +5452,309 @@ async def reset_all_ratings(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_context=get_chat_context(update)
         )
 
+async def recent_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show last 10 matches of a player"""
+    user = update.effective_user
+    await send_admin_log(
+        f"CMD: /recent by {user.first_name} (@{user.username or 'no_username'}, ID: {user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
+    )
+    
+    # Determine target user
+    if context.args and context.args[0].startswith('@'):
+        target_username = context.args[0][1:]  # Remove @
+        # Try to find user by username
+        try:
+            conn = get_db_connection()
+            if not conn:
+                await update.message.reply_text("❌ Database connection failed!")
+                return
+            
+            with conn.cursor(cursor_factory=DictCursor) as cur:
+                cur.execute("""
+                    SELECT user_id, username FROM career_stats 
+                    WHERE LOWER(username) = LOWER(%s)
+                    LIMIT 1
+                """, (target_username,))
+                user_result = cur.fetchone()
+                
+                if not user_result:
+                    await update.message.reply_text(
+                        f"❌ User @{escape_markdown_v2_custom(target_username)} not found\\!",
+                        parse_mode=ParseMode.MARKDOWN_V2
+                    )
+                    return_db_connection(conn)
+                    return
+                
+                target_user_id = str(user_result['user_id'])
+                target_username = user_result['username']
+            return_db_connection(conn)
+        except Exception as e:
+            logger.error(f"Error finding user: {e}")
+            await update.message.reply_text("❌ Error finding user!")
+            return
+    else:
+        target_user_id = str(user.id)
+        target_username = user.first_name
+    
+    try:
+        conn = get_db_connection()
+        if not conn:
+            await update.message.reply_text("❌ Database connection failed!")
+            return
+        
+        with conn.cursor(cursor_factory=DictCursor) as cur:
+            # Get last 10 matches
+            cur.execute("""
+                SELECT 
+                    player1_id, player2_id, winner_id,
+                    p1_rating_before, p1_rating_after, p1_rating_change,
+                    p2_rating_before, p2_rating_after, p2_rating_change,
+                    p1_score, p1_wickets, p1_overs,
+                    p2_score, p2_wickets, p2_overs,
+                    match_date
+                FROM ranked_matches
+                WHERE player1_id = %s OR player2_id = %s
+                ORDER BY match_date DESC
+                LIMIT 10
+            """, (target_user_id, target_user_id))
+            matches = cur.fetchall()
+            
+            # Get current stats
+            cur.execute("""
+                SELECT rating, rank_tier, total_matches, wins, losses
+                FROM career_stats WHERE user_id = %s
+            """, (target_user_id,))
+            stats = cur.fetchone()
+            
+            # Get usernames for opponents
+            opponent_ids = set()
+            for match in matches:
+                if str(match['player1_id']) != target_user_id:
+                    opponent_ids.add(match['player1_id'])
+                if str(match['player2_id']) != target_user_id:
+                    opponent_ids.add(match['player2_id'])
+            
+            # Fetch opponent names
+            opponent_names = {}
+            if opponent_ids:
+                cur.execute("""
+                    SELECT user_id, username FROM career_stats
+                    WHERE user_id = ANY(%s)
+                """, (list(opponent_ids),))
+                for row in cur.fetchall():
+                    opponent_names[str(row['user_id'])] = row['username']
+        
+        return_db_connection(conn)
+        
+        if not matches:
+            await update.message.reply_text(
+                f"📊 *MATCH HISTORY*\n"
+                f"━━━━━━━━━━━━━━━━\n\n"
+                f"No ranked matches found for {escape_markdown_v2_custom(target_username)}\\!",
+                parse_mode=ParseMode.MARKDOWN_V2
+            )
+            return
+        
+        # Build message
+        current_rating = stats['rating'] if stats else 1000
+        current_tier = stats['rank_tier'] if stats else "Silver III"
+        
+        msg = (
+            f"📊 *MATCH HISTORY*\n"
+            f"━━━━━━━━━━━━━━━━\n\n"
+            f"*Player:* {escape_markdown_v2_custom(target_username)}\n"
+            f"*Current Rating:* {current_rating} \\({escape_markdown_v2_custom(current_tier)}\\)\n"
+            f"*Record:* {stats['wins'] if stats else 0}W\\-{stats['losses'] if stats else 0}L\n\n"
+            f"*Last 10 Matches:*\n"
+            f"━━━━━━━━━━━━━━━━\n\n"
+        )
+        
+        for idx, match in enumerate(matches, 1):
+            # Determine if target was player1 or player2
+            is_player1 = str(match['player1_id']) == target_user_id
+            
+            opponent_id = str(match['player2_id']) if is_player1 else str(match['player1_id'])
+            opponent_name = opponent_names.get(opponent_id, "Unknown")
+            
+            # Get target's stats for this match
+            if is_player1:
+                rating_before = match['p1_rating_before']
+                rating_after = match['p1_rating_after']
+                rating_change = match['p1_rating_change']
+                target_score = match['p1_score']
+                target_wickets = match['p1_wickets']
+                opp_score = match['p2_score']
+                opp_wickets = match['p2_wickets']
+                won = str(match['winner_id']) == target_user_id
+            else:
+                rating_before = match['p2_rating_before']
+                rating_after = match['p2_rating_after']
+                rating_change = match['p2_rating_change']
+                target_score = match['p2_score']
+                target_wickets = match['p2_wickets']
+                opp_score = match['p1_score']
+                opp_wickets = match['p1_wickets']
+                won = str(match['winner_id']) == target_user_id
+            
+            # Result emoji
+            result_emoji = "✅" if won else "❌"
+            
+            # Format result
+            if won:
+                if target_score > opp_score:
+                    result = f"Won by {target_score - opp_score} runs"
+                else:
+                    result = f"Won by {10 - target_wickets} wkts"
+            else:
+                if opp_score > target_score:
+                    result = f"Lost by {opp_score - target_score} runs"
+                else:
+                    result = f"Lost by {10 - opp_wickets} wkts"
+            
+            # Format rating change
+            change_str = f"+{rating_change}" if rating_change > 0 else str(rating_change)
+            
+            match_date = match['match_date'].strftime("%d %b")
+            
+            msg += (
+                f"{result_emoji} *Match {idx}* \\({escape_markdown_v2_custom(match_date)}\\)\n"
+                f"vs {escape_markdown_v2_custom(opponent_name)}\n"
+                f"Score: {target_score}/{target_wickets} vs {opp_score}/{opp_wickets}\n"
+                f"{escape_markdown_v2_custom(result)}\n"
+                f"Rating: {rating_before} → {rating_after} \\({escape_markdown_v2_custom(change_str)}\\)\n\n"
+            )
+        
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
+        
+    except Exception as e:
+        logger.error(f"Error showing recent matches: {e}")
+        await update.message.reply_text(
+            f"❌ Error: {escape_markdown_v2_custom(str(e))}",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+
+async def set_player_rating(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to manually set a player's rating"""
+    if not check_admin(str(update.effective_user.id)):
+        await update.message.reply_text("❌ Unauthorized")
+        return
+    
+    admin_user = update.effective_user
+    await send_admin_log(
+        f"CMD: /setrating by {admin_user.first_name} (@{admin_user.username or 'no_username'}, ID: {admin_user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
+    )
+    
+    # Check args
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            "📝 *SET PLAYER RATING*\n"
+            "━━━━━━━━━━━━━━━━\n\n"
+            "*Usage:*\n"
+            "`/setrating <user_id> <rating>`\n\n"
+            "*Example:*\n"
+            "`/setrating 123456789 1500`\n\n"
+            "This will set the player's rating to 1500 and update their rank tier accordingly\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+        return
+    
+    try:
+        target_user_id = context.args[0]
+        new_rating = int(context.args[1])
+        
+        if new_rating < 0 or new_rating > 10000:
+            await update.message.reply_text(
+                "❌ Rating must be between 0 and 10000\\!",
+                parse_mode=ParseMode.MARKDOWN_V2
+            )
+            return
+        
+        conn = get_db_connection()
+        if not conn:
+            await update.message.reply_text("❌ Database connection failed\\!")
+            return
+        
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cur:
+                # Check if user exists
+                cur.execute("""
+                    SELECT user_id, username, rating FROM career_stats
+                    WHERE user_id = %s
+                """, (target_user_id,))
+                user_data = cur.fetchone()
+                
+                if not user_data:
+                    await update.message.reply_text(
+                        f"❌ User ID `{escape_markdown_v2_custom(target_user_id)}` not found in database\\!",
+                        parse_mode=ParseMode.MARKDOWN_V2
+                    )
+                    return_db_connection(conn)
+                    return
+                
+                old_rating = user_data['rating']
+                username = user_data['username']
+                new_tier = get_rank_tier(new_rating)
+                
+                # Update rating
+                cur.execute("""
+                    UPDATE career_stats
+                    SET rating = %s,
+                        rank_tier = %s,
+                        highest_rating = GREATEST(highest_rating, %s),
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE user_id = %s
+                """, (new_rating, new_tier, new_rating, target_user_id))
+                
+                conn.commit()
+                
+                logger.info(f"🔧 Admin manually set {username} (ID: {target_user_id}) rating: {old_rating} → {new_rating}")
+                
+                result_msg = (
+                    f"✅ *RATING UPDATED*\n"
+                    f"━━━━━━━━━━━━━━━━\n\n"
+                    f"*Player:* {escape_markdown_v2_custom(username)}\n"
+                    f"*User ID:* `{escape_markdown_v2_custom(target_user_id)}`\n\n"
+                    f"*Old Rating:* {old_rating}\n"
+                    f"*New Rating:* {new_rating}\n"
+                    f"*New Tier:* {escape_markdown_v2_custom(new_tier)}\n\n"
+                    f"✅ Rating manually updated by admin\\!"
+                )
+                
+                await send_admin_log(
+                    f"🔧 Manually set rating\n"
+                    f"Player: {username} (ID: {target_user_id})\n"
+                    f"Rating: {old_rating} → {new_rating}\n"
+                    f"Tier: {new_tier}",
+                    log_type="success",
+                    chat_context=get_chat_context(update)
+                )
+                
+        finally:
+            return_db_connection(conn)
+        
+        await update.message.reply_text(result_msg, parse_mode=ParseMode.MARKDOWN_V2)
+        
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Invalid rating\\! Must be a number\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+    except Exception as e:
+        logger.error(f"Error setting rating: {e}")
+        await update.message.reply_text(
+            f"❌ Error: {escape_markdown_v2_custom(str(e))}",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+        await send_admin_log(
+            f"❌ Error setting rating: {str(e)}",
+            log_type="error",
+            chat_context=get_chat_context(update)
+        )
+
 # --- Scorecard Functions ---
 # Add save_match function improvements
 @require_subscription
@@ -10304,6 +10607,7 @@ def main():
     application.add_handler(CommandHandler("profile", profile))
     application.add_handler(CommandHandler("career", career))  # Career/ranking system
     application.add_handler(CommandHandler("leaderboard", leaderboard))  # Phase 4: Leaderboard
+    application.add_handler(CommandHandler("recent", recent_matches))  # Recent match history
     application.add_handler(CommandHandler("ranks", ranks))  # Phase 4: Rank info
     application.add_handler(CommandHandler("rankedinfo", rankedinfo))  # Ranked system guide
     application.add_handler(CommandHandler("ranked", ranked))  # Phase 2: Ranked matchmaking
@@ -10372,6 +10676,7 @@ def main():
     application.add_handler(CommandHandler("stopgames", stop_games))
     application.add_handler(CommandHandler("forceremove", force_remove_player))
     application.add_handler(CommandHandler("resetratings", reset_all_ratings))
+    application.add_handler(CommandHandler("setrating", set_player_rating))
     application.add_handler(CommandHandler("maintenance", toggle_maintenance))
     application.add_handler(CommandHandler("botstats", botstats))
     application.add_handler(CommandHandler("resetstats", reset_stats))
