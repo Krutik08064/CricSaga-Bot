@@ -5462,9 +5462,19 @@ async def recent_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     # Determine target user
-    if context.args and context.args[0].startswith('@'):
-        target_username = context.args[0][1:]  # Remove @
-        # Try to find user by username
+    # Priority: 1. Reply to message, 2. username/@username/user_id, 3. Self
+    if update.message.reply_to_message:
+        # Check if replying to a user's message
+        replied_user = update.message.reply_to_message.from_user
+        target_user_id = str(replied_user.id)
+        target_username = replied_user.first_name
+    elif context.args:
+        search_term = context.args[0]
+        # Remove @ if present
+        if search_term.startswith('@'):
+            search_term = search_term[1:]
+        
+        # Try to find user by username or user_id
         try:
             conn = get_db_connection()
             if not conn:
@@ -5472,16 +5482,27 @@ async def recent_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             
             with conn.cursor(cursor_factory=DictCursor) as cur:
-                cur.execute("""
-                    SELECT user_id, username FROM career_stats 
-                    WHERE LOWER(username) = LOWER(%s)
-                    LIMIT 1
-                """, (target_username,))
+                # Check if it's a numeric ID or username
+                if search_term.isdigit():
+                    # Search by user_id
+                    cur.execute("""
+                        SELECT user_id, username FROM career_stats 
+                        WHERE user_id = %s
+                        LIMIT 1
+                    """, (search_term,))
+                else:
+                    # Search by username
+                    cur.execute("""
+                        SELECT user_id, username FROM career_stats 
+                        WHERE LOWER(username) = LOWER(%s)
+                        LIMIT 1
+                    """, (search_term,))
+                
                 user_result = cur.fetchone()
                 
                 if not user_result:
                     await update.message.reply_text(
-                        f"❌ User @{escape_markdown_v2_custom(target_username)} not found\\!",
+                        f"❌ User `{escape_markdown_v2_custom(search_term)}` not found\\!",
                         parse_mode=ParseMode.MARKDOWN_V2
                     )
                     return_db_connection(conn)
