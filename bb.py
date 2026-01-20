@@ -5403,33 +5403,42 @@ async def reset_all_ratings(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 cur.execute("SELECT COUNT(*) FROM career_stats")
                 total_players = cur.fetchone()[0]
                 
-                # Reset all ratings to 1000 and rank_tier to Silver III
+                # Reset ALL stats to default tournament state
                 cur.execute("""
                     UPDATE career_stats 
                     SET rating = 1000,
                         rank_tier = '🥈 Silver III',
+                        total_matches = 0,
+                        wins = 0,
+                        losses = 0,
                         current_streak = 0,
+                        highest_rating = 1000,
                         streak_type = NULL,
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE rating != 1000
                 """)
                 
                 affected_rows = cur.rowcount
                 conn.commit()
                 
-                logger.info(f"🔄 Admin reset {affected_rows} player ratings to 1000")
+                logger.info(f"🔄 Admin reset ALL stats for {affected_rows} players")
                 
                 result_msg = (
-                    f"✅ *RATINGS RESET COMPLETE*\n"
+                    f"✅ *COMPLETE STATS RESET*\n"
                     f"━━━━━━━━━━━━━━━━\n\n"
-                    f"• Total players in DB: {total_players}\n"
-                    f"• Ratings reset: {affected_rows}\n"
-                    f"• New rating: 1000 \\(Silver III\\)\n\n"
+                    f"• Total players: {total_players}\n"
+                    f"• Players reset: {affected_rows}\n\n"
+                    f"*Reset to defaults:*\n"
+                    f"• Rating: 1000 \\(Silver III\\)\n"
+                    f"• Wins: 0\n"
+                    f"• Losses: 0\n"
+                    f"• Matches: 0\n"
+                    f"• Streak: 0\n\n"
                     f"✅ All players ready for tournament\\!"
                 )
                 
                 await send_admin_log(
-                    f"✅ Reset {affected_rows} player ratings to 1000\n"
+                    f"✅ Complete stats reset for {affected_rows} players\n"
+                    f"Rating: 1000, Wins: 0, Losses: 0, Matches: 0\n"
                     f"Total players: {total_players}",
                     log_type="success",
                     chat_context=get_chat_context(update)
