@@ -5378,7 +5378,7 @@ async def reset_all_ratings(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "⚠️ *RESET ALL RATINGS*\n"
             "━━━━━━━━━━━━━━━━\n\n"
             "This will reset ALL players' ratings to:\n"
-            "• Rating: 1000 (Silver III)\n"
+            "• Rating: 1000 \\(Silver III\\)\n"
             "• Wins/Losses: Unchanged\n"
             "• Match history: Preserved\n\n"
             "⚠️ *This action cannot be undone\\!*\n\n"
@@ -5566,7 +5566,7 @@ async def recent_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"━━━━━━━━━━━━━━━━\n\n"
             f"*Player:* {escape_markdown_v2_custom(target_username)}\n"
             f"*Current Rating:* {current_rating} \\({escape_markdown_v2_custom(current_tier)}\\)\n"
-            f"*Record:* {stats['wins'] if stats else 0}W\\-{stats['losses'] if stats else 0}L\n\n"
+            f"*Record:* {stats['wins'] if stats else 0}W\\\\-{stats['losses'] if stats else 0}L\n\n"
             f"*Last 10 Matches:*\n"
             f"━━━━━━━━━━━━━━━━\n\n"
         )
