@@ -5359,6 +5359,99 @@ async def force_remove_player(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     await update.message.reply_text(result_msg, parse_mode=ParseMode.MARKDOWN_V2)
 
+async def reset_all_ratings(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to reset all player ratings to 1000 for tournament"""
+    if not check_admin(str(update.effective_user.id)):
+        await update.message.reply_text("❌ Unauthorized")
+        return
+    
+    admin_user = update.effective_user
+    await send_admin_log(
+        f"CMD: /resetratings by {admin_user.first_name} (@{admin_user.username or 'no_username'}, ID: {admin_user.id})",
+        log_type="command",
+        chat_context=get_chat_context(update)
+    )
+    
+    # Confirmation check
+    if not context.args or context.args[0].lower() != "confirm":
+        await update.message.reply_text(
+            "⚠️ *RESET ALL RATINGS*\n"
+            "━━━━━━━━━━━━━━━━\n\n"
+            "This will reset ALL players' ratings to:\n"
+            "• Rating: 1000 (Silver III)\n"
+            "• Wins/Losses: Unchanged\n"
+            "• Match history: Preserved\n\n"
+            "⚠️ *This action cannot be undone\\!*\n\n"
+            "To confirm, use:\n"
+            "`/resetratings confirm`",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+        return
+    
+    try:
+        conn = get_db_connection()
+        if not conn:
+            await update.message.reply_text(
+                "❌ Database connection failed\\!",
+                parse_mode=ParseMode.MARKDOWN_V2
+            )
+            return
+        
+        try:
+            with conn.cursor() as cur:
+                # Count players before reset
+                cur.execute("SELECT COUNT(*) FROM career_stats")
+                total_players = cur.fetchone()[0]
+                
+                # Reset all ratings to 1000 and rank_tier to Silver III
+                cur.execute("""
+                    UPDATE career_stats 
+                    SET rating = 1000,
+                        rank_tier = '🥈 Silver III',
+                        current_streak = 0,
+                        streak_type = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE rating != 1000
+                """)
+                
+                affected_rows = cur.rowcount
+                conn.commit()
+                
+                logger.info(f"🔄 Admin reset {affected_rows} player ratings to 1000")
+                
+                result_msg = (
+                    f"✅ *RATINGS RESET COMPLETE*\n"
+                    f"━━━━━━━━━━━━━━━━\n\n"
+                    f"• Total players in DB: {total_players}\n"
+                    f"• Ratings reset: {affected_rows}\n"
+                    f"• New rating: 1000 \\(Silver III\\)\n\n"
+                    f"✅ All players ready for tournament\\!"
+                )
+                
+                await send_admin_log(
+                    f"✅ Reset {affected_rows} player ratings to 1000\n"
+                    f"Total players: {total_players}",
+                    log_type="success",
+                    chat_context=get_chat_context(update)
+                )
+                
+        finally:
+            return_db_connection(conn)
+            
+        await update.message.reply_text(result_msg, parse_mode=ParseMode.MARKDOWN_V2)
+        
+    except Exception as e:
+        logger.error(f"Error resetting ratings: {e}")
+        await update.message.reply_text(
+            f"❌ Error resetting ratings: {escape_markdown_v2_custom(str(e))}",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+        await send_admin_log(
+            f"❌ Error resetting ratings: {str(e)}",
+            log_type="error",
+            chat_context=get_chat_context(update)
+        )
+
 # --- Scorecard Functions ---
 # Add save_match function improvements
 @require_subscription
@@ -10278,6 +10371,7 @@ def main():
     application.add_handler(CommandHandler("broadcast", broadcast_message))
     application.add_handler(CommandHandler("stopgames", stop_games))
     application.add_handler(CommandHandler("forceremove", force_remove_player))
+    application.add_handler(CommandHandler("resetratings", reset_all_ratings))
     application.add_handler(CommandHandler("maintenance", toggle_maintenance))
     application.add_handler(CommandHandler("botstats", botstats))
     application.add_handler(CommandHandler("resetstats", reset_stats))
