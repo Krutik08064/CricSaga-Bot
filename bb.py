@@ -7596,9 +7596,19 @@ def get_rank_tier_distance(tier1: str, tier2: str) -> int:
         "Immortal I", "Immortal II", "Immortal III"
     ]
     
+    # Remove emojis from tier names (e.g., "🥈 Silver III" -> "Silver III")
+    def clean_tier(tier: str) -> str:
+        # Split by space and take last two parts (e.g., "Silver III")
+        parts = tier.split()
+        if len(parts) >= 2:
+            return ' '.join(parts[-2:])
+        return tier
+    
     try:
-        idx1 = tier_order.index(tier1)
-        idx2 = tier_order.index(tier2)
+        clean_tier1 = clean_tier(tier1)
+        clean_tier2 = clean_tier(tier2)
+        idx1 = tier_order.index(clean_tier1)
+        idx2 = tier_order.index(clean_tier2)
         return abs(idx1 - idx2)
     except ValueError:
         return 999  # Unknown tier, return large number
