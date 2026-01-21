@@ -291,8 +291,8 @@ DB_CONFIG = {
 
 # Add near the top with other constants
 # Optimized for Supabase Transaction Mode
-DB_POOL_MIN = 5  # Reduced from 10 to avoid keeping too many idle connections
-DB_POOL_MAX = 20  # Reduced from 30 - quality over quantity
+DB_POOL_MIN = 10  # Increased from 5
+DB_POOL_MAX = 50  # Increased from 20 to handle concurrent requests
 CONNECTION_MAX_AGE = 180  # Recycle connections after 3 minutes (was 5)
 db_pool = None
 last_pool_check = 0
@@ -588,12 +588,23 @@ def get_db_connection(retry_count=0, max_retries=3):
     except Exception as e:
         logger.error(f"Error getting connection from pool: {e}")
         
+        # If pool exhausted, force recreation
+        if "exhausted" in str(e).lower():
+            logger.error("🔴 Pool exhausted! Recreating pool...")
+            try:
+                if db_pool:
+                    db_pool.closeall()
+                db_pool = None
+            except:
+                pass
+        
         # Retry on any exception
         if retry_count < max_retries:
             logger.info(f"Retry {retry_count + 1}/{max_retries} after exception")
             time.sleep(2 ** retry_count)
             return get_db_connection(retry_count + 1, max_retries)
         
+        logger.error("❌ Failed to get connection after all retries")
         return None
 
 def return_db_connection(conn):
@@ -606,7 +617,7 @@ def return_db_connection(conn):
             logger.error(f"Error returning connection to pool: {e}")
 
 class DatabaseTransaction:
-    """Context manager for database transactions"""
+    """Context manager for database transactions with automatic connection return"""
     def __init__(self):
         self.conn = None
         self.cursor = None
@@ -619,21 +630,39 @@ class DatabaseTransaction:
         return self.cursor
     
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            # An error occurred, rollback
+        try:
+            if exc_type is not None:
+                # An error occurred, rollback
+                if self.conn:
+                    self.conn.rollback()
+                    logger.error(f"Transaction rolled back due to: {exc_val}")
+            else:
+                # Success, commit
+                if self.conn:
+                    self.conn.commit()
+        finally:
+            # ALWAYS return connection to pool
             if self.conn:
-                self.conn.rollback()
-                logger.error(f"Transaction rolled back due to: {exc_val}")
-        else:
-            # Success, commit
-            if self.conn:
-                self.conn.commit()
+                return_db_connection(self.conn)
         
-        if self.cursor:
-            self.cursor.close()
+        # Don't suppress exceptions
+        return False
+
+class DatabaseConnection:
+    """Context manager for simple database queries with automatic connection return"""
+    def __init__(self):
+        self.conn = None
+    
+    def __enter__(self):
+        self.conn = get_db_connection()
+        if not self.conn:
+            raise Exception("Failed to get database connection")
+        return self.conn
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # ALWAYS return connection to pool, even if exception occurred
         if self.conn:
             return_db_connection(self.conn)
-        
         return False  # Don't suppress exceptions
 
 # Add new function to check connection status
