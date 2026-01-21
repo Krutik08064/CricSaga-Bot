@@ -9220,9 +9220,9 @@ async def challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # ========== END ANTI-CHEAT CHECKS ==========
         
         # Check rank tier distance (must be within ±2 tiers)
-        logger.info(f"Checking tier distance between {challenger_rank} and {target_rank}")
         challenger_rank = challenger_stats['rank_tier']
         target_rank = target_stats['rank_tier']
+        logger.info(f"Checking tier distance between {challenger_rank} and {target_rank}")
         tier_distance = get_rank_tier_distance(challenger_rank, target_rank)
         logger.info(f"Tier distance calculated: {tier_distance}")
         
