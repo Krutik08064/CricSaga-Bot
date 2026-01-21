@@ -5300,7 +5300,7 @@ async def force_remove_player(update: Update, context: ContextTypes.DEFAULT_TYPE
         target_user_id = int(context.args[0])
     except ValueError:
         await update.message.reply_text(
-            "❌ Invalid user ID\! Must be a number\.",
+            "❌ Invalid user ID\\! Must be a number\\.",
             parse_mode=ParseMode.MARKDOWN_V2
         )
         return
@@ -5385,7 +5385,7 @@ async def force_remove_player(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"ℹ️ *NO ACTION NEEDED*\n"
             f"━━━━━━━━━━━━━━━━\n\n"
             f"*User ID:* `{target_user_id}`\n\n"
-            f"Player is not in any queue, match, or challenge\."
+            f"Player is not in any queue, match, or challenge\\."
         )
     
     await update.message.reply_text(result_msg, parse_mode=ParseMode.MARKDOWN_V2)
