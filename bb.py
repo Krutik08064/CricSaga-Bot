@@ -1436,12 +1436,8 @@ async def check_match_patterns(player1_id: str, player2_id: str) -> tuple[bool, 
     Returns: (is_suspicious, reason, pattern_data)
     """
     try:
-        conn = get_db_connection()
-        if not conn:
-            logger.warning("check_match_patterns: Failed to get DB connection, returning safe defaults")
-            return False, "", {}
-        
-        with conn.cursor() as cur:
+        with DatabaseConnection() as conn:
+            with conn.cursor() as cur:
             # Get match pattern between these two players
             cur.execute("""
                 SELECT total_matches, wins, losses, matches_last_24h, last_match_time
@@ -1497,9 +1493,6 @@ async def check_match_patterns(player1_id: str, player2_id: str) -> tuple[bool, 
     except Exception as e:
         logger.error(f"Error checking match patterns for {player1_id} vs {player2_id}: {e}", exc_info=True)
         return False, "", {}
-    finally:
-        if 'conn' in locals() and conn:
-            return_db_connection(conn)
 
 async def detect_win_trading(player1_id: str, player2_id: str) -> tuple[bool, str]:
     """
@@ -7751,37 +7744,31 @@ async def is_player_available(user_id: int) -> bool:
 async def get_career_stats(user_id: str) -> dict:
     """Get career/ranking stats for a player"""
     try:
-        conn = get_db_connection()
-        if not conn:
-            return None
-            
-        with conn.cursor(cursor_factory=DictCursor) as cur:
-            # Check if player exists
-            cur.execute("""
-                SELECT * FROM career_stats WHERE user_id = %s
-            """, (user_id,))
-            
-            result = cur.fetchone()
-            
-            if not result:
-                # Create new career record
+        with DatabaseConnection() as conn:
+            with conn.cursor(cursor_factory=DictCursor) as cur:
+                # Check if player exists
                 cur.execute("""
-                    INSERT INTO career_stats 
-                        (user_id, username, rating, rank_tier, total_matches, wins, losses)
-                    VALUES (%s, '', 1000, 'Silver III', 0, 0, 0)
-                    RETURNING *
+                    SELECT * FROM career_stats WHERE user_id = %s
                 """, (user_id,))
-                conn.commit()
+                
                 result = cur.fetchone()
-            
-            return dict(result) if result else None
-            
+                
+                if not result:
+                    # Create new career record
+                    cur.execute("""
+                        INSERT INTO career_stats 
+                            (user_id, username, rating, rank_tier, total_matches, wins, losses)
+                        VALUES (%s, '', 1000, 'Silver III', 0, 0, 0)
+                        RETURNING *
+                    """, (user_id,))
+                    conn.commit()
+                    result = cur.fetchone()
+                
+                return dict(result) if result else None
+                
     except Exception as e:
         logger.error(f"Error getting career stats: {e}")
         return None
-    finally:
-        if conn:
-            return_db_connection(conn)
 
 def calculate_performance_bonus(game: dict, winner_side: str) -> int:
     """Calculate performance bonus points based on match dominance"""
@@ -7855,11 +7842,8 @@ async def update_career_stats(winner_id: str, loser_id: str, winner_gain: int, l
                               winner_name: str = "", loser_name: str = "") -> tuple:
     """Update career stats after a match"""
     try:
-        conn = get_db_connection()
-        if not conn:
-            return None, None
-            
-        with conn.cursor(cursor_factory=DictCursor) as cur:
+        with DatabaseConnection() as conn:
+            with conn.cursor(cursor_factory=DictCursor) as cur:
             # Get current stats
             winner_stats = await get_career_stats(winner_id)
             loser_stats = await get_career_stats(loser_id)
@@ -7927,20 +7911,13 @@ async def update_career_stats(winner_id: str, loser_id: str, winner_gain: int, l
     except Exception as e:
         logger.error(f"Error updating career stats: {e}")
         return None, None
-    finally:
-        if conn:
-            return_db_connection(conn)
 
 async def save_ranked_match(game: dict, winner_id: str, loser_id: str, 
                             winner_gain: int, loser_loss: int, performance_bonus: int) -> bool:
     """Save ranked match history"""
-    conn = None
     try:
-        conn = get_db_connection()
-        if not conn:
-            return False
-            
-        with conn.cursor() as cur:
+        with DatabaseConnection() as conn:
+            with conn.cursor() as cur:
             # Get ratings before match
             winner_stats = await get_career_stats(winner_id)
             loser_stats = await get_career_stats(loser_id)
@@ -7993,9 +7970,6 @@ async def save_ranked_match(game: dict, winner_id: str, loser_id: str,
     except Exception as e:
         logger.error(f"Error saving ranked match: {e}")
         return False
-    finally:
-        if conn:
-            return_db_connection(conn)
 
 @require_subscription
 async def career(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -9295,32 +9269,23 @@ async def challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Store challenge in database
         try:
             logger.info(f"Attempting to store challenge {challenge_id} in database")
-            conn = get_db_connection()
-            if not conn:
-                logger.error(f"Failed to get database connection for challenge {challenge_id}")
-                await update.message.reply_text(
-                    "❌ *Database Error*\n"
-                    "Please try again later\\.",
-                    parse_mode=ParseMode.MARKDOWN_V2
-                )
-                return
-            
-            with conn.cursor() as cur:
-                expires_at = datetime.now() + timedelta(seconds=60)
-                
-                cur.execute("""
-                    INSERT INTO pending_challenges 
-                    (challenge_id, challenger_id, target_id, challenger_name, target_name,
-                     challenger_rating, target_rating, challenger_rank, target_rank, expires_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """, (
-                    challenge_id, user_id, target_id, username, target_name,
-                    challenger_stats['rating'], target_stats['rating'],
-                    challenger_rank, target_rank, expires_at
-                ))
-                
-                conn.commit()
-                logger.info(f"Challenge {challenge_id} successfully stored in database")
+            with DatabaseConnection() as conn:
+                with conn.cursor() as cur:
+                    expires_at = datetime.now() + timedelta(seconds=60)
+                    
+                    cur.execute("""
+                        INSERT INTO pending_challenges 
+                        (challenge_id, challenger_id, target_id, challenger_name, target_name,
+                         challenger_rating, target_rating, challenger_rank, target_rank, expires_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        challenge_id, user_id, target_id, username, target_name,
+                        challenger_stats['rating'], target_stats['rating'],
+                        challenger_rank, target_rank, expires_at
+                    ))
+                    
+                    conn.commit()
+                    logger.info(f"Challenge {challenge_id} successfully stored in database")
         
         except Exception as e:
             logger.error(f"Error creating challenge {challenge_id}: {e}", exc_info=True)
@@ -9330,9 +9295,6 @@ async def challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode=ParseMode.MARKDOWN_V2
             )
             return
-        finally:
-            if conn:
-                return_db_connection(conn)
         
         # Create accept/decline buttons
         keyboard = [
@@ -9395,16 +9357,12 @@ async def challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Error sending challenge notification for {challenge_id}: {e}", exc_info=True)
             # Remove challenge from database
             try:
-                conn = get_db_connection()
-                if conn:
+                with DatabaseConnection() as conn:
                     with conn.cursor() as cur:
                         cur.execute("DELETE FROM pending_challenges WHERE challenge_id = %s", (challenge_id,))
                         conn.commit()
             except:
                 pass
-            finally:
-                if conn:
-                    return_db_connection(conn)
             
             await update.message.reply_text(
                 "❌ *Challenge Failed*\n"
