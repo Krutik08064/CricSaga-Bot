@@ -281,9 +281,9 @@ DB_CONFIG = {
     'connect_timeout': 10,  # 10 second connection timeout
     'sslmode': 'require',
     'keepalives': 1,
-    'keepalives_idle': 30,
-    'keepalives_interval': 10,
-    'keepalives_count': 5,
+    'keepalives_idle': 10,  # Send keepalive after 10s idle (was 30s)
+    'keepalives_interval': 5,  # Retry keepalive every 5s (was 10s)
+    'keepalives_count': 3,  # Give up after 3 failed keepalives (was 5)
     'client_encoding': 'utf8',
     'application_name': 'cricket_bot',
     'options': '-c statement_timeout=30000'  # 30 second query timeout
@@ -291,9 +291,9 @@ DB_CONFIG = {
 
 # Add near the top with other constants
 # Optimized for Supabase Transaction Mode
-DB_POOL_MIN = 10
-DB_POOL_MAX = 30  # Transaction Mode supports 1000+ connections
-CONNECTION_MAX_AGE = 300  # Recycle connections after 5 minutes
+DB_POOL_MIN = 5  # Reduced from 10 to avoid keeping too many idle connections
+DB_POOL_MAX = 20  # Reduced from 30 - quality over quantity
+CONNECTION_MAX_AGE = 180  # Recycle connections after 3 minutes (was 5)
 db_pool = None
 last_pool_check = 0
 
@@ -522,12 +522,19 @@ def check_flood_limit(user_id: str) -> bool:
     timestamps.append(now)
     return True  # OK to proceed
 
-def get_db_connection():
-    """Get a connection from the pool with health check"""
+def get_db_connection(retry_count=0, max_retries=3):
+    """Get a connection from the pool with health check and automatic retry"""
     global db_pool
+    
     if db_pool is None:
+        logger.warning("Connection pool is None, initializing...")
         if not init_db_pool():
+            if retry_count < max_retries:
+                logger.info(f"Retry {retry_count + 1}/{max_retries} after pool init failure")
+                time.sleep(2 ** retry_count)  # Exponential backoff: 1, 2, 4 seconds
+                return get_db_connection(retry_count + 1, max_retries)
             return None
+    
     try:
         # Get connection from pool
         conn = db_pool.getconn()
@@ -536,6 +543,8 @@ def get_db_connection():
         try:
             with conn.cursor() as cursor:
                 cursor.execute('SELECT 1')
+            return conn  # Connection is healthy
+            
         except Exception as e:
             # Connection is dead, close it and get a new one
             logger.warning(f"Dead connection detected ({e}), getting new one")
@@ -543,30 +552,48 @@ def get_db_connection():
                 conn.close()
             except:
                 pass
+            
             # Put back bad connection so pool can create new one
-            db_pool.putconn(conn, close=True)
-            # Get fresh connection
-            conn = db_pool.getconn()
-            # Test new connection
             try:
-                with conn.cursor() as cursor:
-                    cursor.execute('SELECT 1')
-            except Exception as e2:
-                logger.error(f"New connection also failed: {e2}")
-                # Reinitialize entire pool
-                db_pool.closeall()
-                if not init_db_pool():
-                    return None
-                conn = db_pool.getconn()
-        
-        return conn
-    except Exception as e:
-        logger.error(f"Error getting connection from pool: {e}")
-        if db_pool is not None and 'conn' in locals():
-            try:
-                db_pool.putconn(conn)
+                db_pool.putconn(conn, close=True)
             except:
                 pass
+            
+            # Get fresh connection
+            try:
+                conn = db_pool.getconn()
+                # Test new connection
+                with conn.cursor() as cursor:
+                    cursor.execute('SELECT 1')
+                return conn  # New connection works
+                
+            except Exception as e2:
+                logger.error(f"New connection also failed: {e2}")
+                
+                # Last resort: Reinitialize entire pool
+                try:
+                    logger.warning("Recreating entire connection pool...")
+                    db_pool.closeall()
+                    db_pool = None
+                except:
+                    pass
+                
+                if retry_count < max_retries:
+                    logger.info(f"Retry {retry_count + 1}/{max_retries} after connection failure")
+                    time.sleep(2 ** retry_count)  # Exponential backoff
+                    return get_db_connection(retry_count + 1, max_retries)
+                
+                return None
+    
+    except Exception as e:
+        logger.error(f"Error getting connection from pool: {e}")
+        
+        # Retry on any exception
+        if retry_count < max_retries:
+            logger.info(f"Retry {retry_count + 1}/{max_retries} after exception")
+            time.sleep(2 ** retry_count)
+            return get_db_connection(retry_count + 1, max_retries)
+        
         return None
 
 def return_db_connection(conn):
@@ -1382,6 +1409,7 @@ async def check_match_patterns(player1_id: str, player2_id: str) -> tuple[bool, 
     try:
         conn = get_db_connection()
         if not conn:
+            logger.warning("check_match_patterns: Failed to get DB connection, returning safe defaults")
             return False, "", {}
         
         with conn.cursor() as cur:
@@ -1438,8 +1466,11 @@ async def check_match_patterns(player1_id: str, player2_id: str) -> tuple[bool, 
             return False, "", {'total': total_matches, 'wins': wins, 'losses': losses}
             
     except Exception as e:
-        logger.error(f"Error checking match patterns: {e}")
+        logger.error(f"Error checking match patterns for {player1_id} vs {player2_id}: {e}", exc_info=True)
         return False, "", {}
+    finally:
+        if 'conn' in locals() and conn:
+            return_db_connection(conn)
 
 async def detect_win_trading(player1_id: str, player2_id: str) -> tuple[bool, str]:
     """
@@ -9102,6 +9133,7 @@ async def challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         # Check if both users have career stats
+        logger.info(f"Fetching career stats for challenger {user_id} and target {target_id}")
         challenger_stats = await get_career_stats(str(user_id))
         target_stats = await get_career_stats(str(target_id))
         
@@ -9156,18 +9188,22 @@ async def challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        # Check match pattern between these players
-        is_suspicious, reason, pattern = await check_match_patterns(str(user_id), str(target_id))
-        if is_suspicious and pattern.get('recent', 0) >= SUSPICIOUS_OPPONENT_FREQUENCY:
-            await update.message.reply_text(
-                f"⚠️ *TOO MANY MATCHES*\n"
-                f"━━━━━━━━━━━━━━━━\n\n"
-                f"You've played {pattern['recent']} matches with this opponent in 24h\\.\n"
-                f"Take a break and play with others\\!\n\n"
-                f"_This prevents rating manipulation\\._",
-                parse_mode=ParseMode.MARKDOWN_V2
-            )
-            return
+        # Check match pattern between these players (skip if it fails to avoid blocking challenges)
+        try:
+            is_suspicious, reason, pattern = await check_match_patterns(str(user_id), str(target_id))
+            if is_suspicious and pattern.get('recent', 0) >= SUSPICIOUS_OPPONENT_FREQUENCY:
+                logger.info(f"Challenge blocked - too many matches: {user_id} vs {target_id}")
+                await update.message.reply_text(
+                    f"⚠️ *TOO MANY MATCHES*\n"
+                    f"━━━━━━━━━━━━━━━━\n\n"
+                    f"You've played {pattern['recent']} matches with this opponent in 24h\\.\n"
+                    f"Take a break and play with others\\!\n\n"
+                    f"_This prevents rating manipulation\\._",
+                    parse_mode=ParseMode.MARKDOWN_V2
+                )
+                return
+        except Exception as e:
+            logger.error(f"Error checking match patterns (continuing anyway): {e}")
         
         # Low trust warning
         if challenger_trust < MIN_TRUST_SCORE:
@@ -9184,9 +9220,11 @@ async def challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # ========== END ANTI-CHEAT CHECKS ==========
         
         # Check rank tier distance (must be within ±2 tiers)
+        logger.info(f"Checking tier distance between {challenger_rank} and {target_rank}")
         challenger_rank = challenger_stats['rank_tier']
         target_rank = target_stats['rank_tier']
         tier_distance = get_rank_tier_distance(challenger_rank, target_rank)
+        logger.info(f"Tier distance calculated: {tier_distance}")
         
         if tier_distance > 2:
             await update.message.reply_text(
@@ -9200,7 +9238,9 @@ async def challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         # Check if both players are available
+        logger.info(f"Checking if players are available: challenger={user_id}, target={target_id}")
         if not await is_player_available(user_id):
+            logger.info(f"Challenge blocked - challenger {user_id} is busy")
             await update.message.reply_text(
                 "❌ *YOU'RE BUSY*\n"
                 "━━━━━━━━━━━━━━━━\n\n"
@@ -9210,6 +9250,7 @@ async def challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         if not await is_player_available(target_id):
+            logger.info(f"Challenge blocked - target {target_id} is busy")
             await update.message.reply_text(
                 f"❌ *PLAYER BUSY*\n"
                 f"━━━━━━━━━━━━━━━━\n\n"
@@ -9220,11 +9261,14 @@ async def challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Create challenge ID
         challenge_id = f"CH{random.randint(1000, 9999)}"
+        logger.info(f"Creating challenge {challenge_id}: {user_id} -> {target_id}")
         
         # Store challenge in database
         try:
+            logger.info(f"Attempting to store challenge {challenge_id} in database")
             conn = get_db_connection()
             if not conn:
+                logger.error(f"Failed to get database connection for challenge {challenge_id}")
                 await update.message.reply_text(
                     "❌ *Database Error*\n"
                     "Please try again later\\.",
@@ -9247,9 +9291,10 @@ async def challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ))
                 
                 conn.commit()
+                logger.info(f"Challenge {challenge_id} successfully stored in database")
         
         except Exception as e:
-            logger.error(f"Error creating challenge: {e}")
+            logger.error(f"Error creating challenge {challenge_id}: {e}", exc_info=True)
             await update.message.reply_text(
                 "❌ *Error*\n"
                 "Failed to create challenge\\.",
@@ -9286,12 +9331,14 @@ async def challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         try:
+            logger.info(f"Sending challenge notification for {challenge_id} to group {chat_id}")
             # Send in group chat
             challenge_msg = await update.message.reply_text(
                 text=challenge_text,
                 reply_markup=reply_markup,
                 parse_mode=ParseMode.HTML
             )
+            logger.info(f"Challenge {challenge_id} notification sent successfully (msg_id: {challenge_msg.message_id})")
             
             # Store chat_id and message_id in database for later updates
             try:
@@ -9313,9 +9360,10 @@ async def challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # Start timeout task
             asyncio.create_task(challenge_timeout_task(challenge_id, user_id, target_id, chat_id, challenge_msg.message_id, context))
+            logger.info(f"Challenge {challenge_id} timeout task started")
             
         except Exception as e:
-            logger.error(f"Error sending challenge notification: {e}")
+            logger.error(f"Error sending challenge notification for {challenge_id}: {e}", exc_info=True)
             # Remove challenge from database
             try:
                 conn = get_db_connection()
@@ -9336,12 +9384,16 @@ async def challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
     
     except Exception as e:
-        logger.error(f"Error in challenge command: {e}")
-        await update.message.reply_text(
-            "❌ *Error*\n"
-            "Something went wrong\\!",
-            parse_mode=ParseMode.MARKDOWN_V2
-        )
+        logger.error(f"Critical error in challenge command: {e}", exc_info=True)
+        try:
+            await update.message.reply_text(
+                "❌ *Error*\n"
+                "Something went wrong\\!",
+                parse_mode=ParseMode.MARKDOWN_V2
+            )
+        except:
+            pass  # If even error message fails, log it
+            logger.error(f"Failed to send error message in challenge command")
 
 async def handle_challenge_accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle challenge acceptance"""
