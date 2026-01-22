@@ -5643,13 +5643,15 @@ async def recent_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Build message
         current_rating = stats['rating'] if stats else 1000
         current_tier = stats['rank_tier'] if stats else "Silver III"
+        wins = stats['wins'] if stats else 0
+        losses = stats['losses'] if stats else 0
         
         msg = (
             f"📊 *MATCH HISTORY*\n"
             f"━━━━━━━━━━━━━━━━\n\n"
             f"*Player:* {escape_markdown_v2_custom(target_username)}\n"
             f"*Current Rating:* {current_rating} \\({escape_markdown_v2_custom(current_tier)}\\)\n"
-            f"*Record:* {stats['wins'] if stats else 0}W\\\\\\\\-{stats['losses'] if stats else 0}L\n\n"
+            f"*Record:* {wins}W \\- {losses}L\n\n"
             f"*Last 10 Matches:*\n"
             f"━━━━━━━━━━━━━━━━\n\n"
         )
@@ -5684,16 +5686,18 @@ async def recent_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Result emoji
             result_emoji = "✅" if won else "❌"
             
-            # Format result
+            # Format result - calculate differences as absolute values to avoid minus signs
             if won:
                 if target_score > opp_score:
-                    result = f"Won by {target_score - opp_score} runs"
+                    runs_diff = abs(target_score - opp_score)
+                    result = f"Won by {runs_diff} runs"
                 else:
                     wickets_remaining = 10 - target_wickets
                     result = f"Won by {wickets_remaining} wkts"
             else:
                 if opp_score > target_score:
-                    result = f"Lost by {opp_score - target_score} runs"
+                    runs_diff = abs(opp_score - target_score)
+                    result = f"Lost by {runs_diff} runs"
                 else:
                     wickets_remaining = 10 - opp_wickets
                     result = f"Lost by {wickets_remaining} wkts"
@@ -5713,7 +5717,7 @@ async def recent_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"vs {escape_markdown_v2_custom(opponent_name)}\n"
                 f"Score: {target_score}/{target_wickets} vs {opp_score}/{opp_wickets}\n"
                 f"{escape_markdown_v2_custom(result)}\n"
-                f"Rating: {rating_before} → {rating_after} \\({change_str}\\)\n\n"
+                f"Rating: {rating_before} \\→ {rating_after} \\({change_str}\\)\n\n"
             )
         
         await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
