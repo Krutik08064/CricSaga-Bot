@@ -1438,57 +1438,57 @@ async def check_match_patterns(player1_id: str, player2_id: str) -> tuple[bool, 
     try:
         with DatabaseConnection() as conn:
             with conn.cursor() as cur:
-            # Get match pattern between these two players
-            cur.execute("""
-                SELECT total_matches, wins, losses, matches_last_24h, last_match_time
-                FROM match_patterns
-                WHERE player_id::bigint = %s AND opponent_id::bigint = %s
-            """, (int(player1_id), int(player2_id)))
-            
-            pattern = cur.fetchone()
-            if not pattern:
-                return False, "", {}
-            
-            total_matches, wins, losses, matches_24h, last_match = pattern
-            
-            # Check 1: Too many matches in 24 hours
-            if matches_24h >= SUSPICIOUS_OPPONENT_FREQUENCY:
-                return True, f"🚨 {matches_24h} matches in 24h", {
-                    'total': total_matches,
-                    'recent': matches_24h,
-                    'wins': wins,
-                    'losses': losses
-                }
-            
-            # Check 2: Too many total matches with same opponent
-            # Get player's total match count
-            cur.execute("""
-                SELECT total_matches FROM career_stats WHERE user_id::bigint = %s
-            """, (int(player1_id),))
-            total_user_matches = cur.fetchone()
-            if total_user_matches and total_user_matches[0] > 0:
-                opponent_percentage = total_matches / total_user_matches[0]
-                if opponent_percentage >= SUSPICIOUS_OPPONENT_PERCENTAGE and total_matches >= 10:
-                    return True, f"🚨 {int(opponent_percentage*100)}% matches vs same opponent", {
+                # Get match pattern between these two players
+                cur.execute("""
+                    SELECT total_matches, wins, losses, matches_last_24h, last_match_time
+                    FROM match_patterns
+                    WHERE player_id::bigint = %s AND opponent_id::bigint = %s
+                """, (int(player1_id), int(player2_id)))
+                
+                pattern = cur.fetchone()
+                if not pattern:
+                    return False, "", {}
+                
+                total_matches, wins, losses, matches_24h, last_match = pattern
+                
+                # Check 1: Too many matches in 24 hours
+                if matches_24h >= SUSPICIOUS_OPPONENT_FREQUENCY:
+                    return True, f"🚨 {matches_24h} matches in 24h", {
                         'total': total_matches,
-                        'percentage': opponent_percentage,
+                        'recent': matches_24h,
                         'wins': wins,
                         'losses': losses
                     }
-            
-            # Check 3: Suspicious win/loss balance (50-50 split suggests trading)
-            if total_matches >= 6:
-                win_rate = wins / total_matches if total_matches > 0 else 0
-                # If win rate is very close to 50%, might be trading
-                if 0.45 <= win_rate <= 0.55 and total_matches >= 10:
-                    return True, f"⚖️ Suspicious 50-50 balance ({wins}W-{losses}L)", {
-                        'total': total_matches,
-                        'wins': wins,
-                        'losses': losses,
-                        'win_rate': win_rate
-                    }
-            
-            return False, "", {'total': total_matches, 'wins': wins, 'losses': losses}
+                
+                # Check 2: Too many total matches with same opponent
+                # Get player's total match count
+                cur.execute("""
+                    SELECT total_matches FROM career_stats WHERE user_id::bigint = %s
+                """, (int(player1_id),))
+                total_user_matches = cur.fetchone()
+                if total_user_matches and total_user_matches[0] > 0:
+                    opponent_percentage = total_matches / total_user_matches[0]
+                    if opponent_percentage >= SUSPICIOUS_OPPONENT_PERCENTAGE and total_matches >= 10:
+                        return True, f"🚨 {int(opponent_percentage*100)}% matches vs same opponent", {
+                            'total': total_matches,
+                            'percentage': opponent_percentage,
+                            'wins': wins,
+                            'losses': losses
+                        }
+                
+                # Check 3: Suspicious win/loss balance (50-50 split suggests trading)
+                if total_matches >= 6:
+                    win_rate = wins / total_matches if total_matches > 0 else 0
+                    # If win rate is very close to 50%, might be trading
+                    if 0.45 <= win_rate <= 0.55 and total_matches >= 10:
+                        return True, f"⚖️ Suspicious 50-50 balance ({wins}W-{losses}L)", {
+                            'total': total_matches,
+                            'wins': wins,
+                            'losses': losses,
+                            'win_rate': win_rate
+                        }
+                
+                return False, "", {'total': total_matches, 'wins': wins, 'losses': losses}
             
     except Exception as e:
         logger.error(f"Error checking match patterns for {player1_id} vs {player2_id}: {e}", exc_info=True)
@@ -5649,7 +5649,7 @@ async def recent_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"━━━━━━━━━━━━━━━━\n\n"
             f"*Player:* {escape_markdown_v2_custom(target_username)}\n"
             f"*Current Rating:* {current_rating} \\({escape_markdown_v2_custom(current_tier)}\\)\n"
-            f"*Record:* {stats['wins'] if stats else 0}W\\\\-{stats['losses'] if stats else 0}L\n\n"
+            f"*Record:* {stats['wins'] if stats else 0}W\\\\\\\\-{stats['losses'] if stats else 0}L\n\n"
             f"*Last 10 Matches:*\n"
             f"━━━━━━━━━━━━━━━━\n\n"
         )
@@ -7490,34 +7490,50 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     try:
-        stats = await get_player_stats(user_id)
+        # Get career stats from career_stats table
+        career_stats = await get_career_stats(user_id)
+        
+        # Get detailed player stats from player_stats table
+        player_stats = await get_player_stats(user_id)
         
         # Calculate stats safely with null checks
-        matches_played = stats['matches_played'] or 0
-        matches_won = stats['matches_won'] or 0
-        win_rate = safe_division(matches_won, matches_played, 0) * 100
-        batting_avg = stats.get('batting_avg', 0)
-        strike_rate = stats.get('strike_rate', 0)
+        total_matches = career_stats.get('total_matches', 0)
+        wins = career_stats.get('wins', 0)
+        losses = career_stats.get('losses', 0)
+        rating = career_stats.get('rating', 1000)
+        rank_tier = career_stats.get('rank_tier', 'Bronze')
+        win_rate = safe_division(wins, total_matches, 0) * 100
+        
+        # Get detailed stats
+        total_runs = player_stats.get('total_runs', 0)
+        batting_avg = player_stats.get('batting_avg', 0)
+        highest_score = player_stats.get('highest_score', 0)
+        boundaries = player_stats.get('boundaries', 0)
+        sixes = player_stats.get('sixes', 0)
+        wickets = player_stats.get('wickets', 0)
+        dot_balls = player_stats.get('dot_balls', 0)
 
         profile_text = (
             f"👤 *PLAYER PROFILE*\n"
             f"━━━━━━━━━━━━━━━━\n\n"
             f"🏏 Player: {escape_markdown_v2_custom(user_name)}\n\n"
             
-            f"📊 *Career*\n"
-            f"• Matches: {matches_played}\n"
-            f"• Wins: {matches_won}\n"
+            f"📊 *Career Stats*\n"
+            f"• Rating: {rating}\n"
+            f"• Rank: {escape_markdown_v2_custom(rank_tier)}\n"
+            f"• Matches: {total_matches}\n"
+            f"• Record: {wins}W \\- {losses}L\n"
             f"• Win Rate: {escape_markdown_v2_custom(f'{win_rate:.0f}%')}\n\n"
             
             f"🏏 *Batting*\n"
-            f"• Runs: {stats['total_runs']}\n"
+            f"• Total Runs: {total_runs}\n"
             f"• Avg: {escape_markdown_v2_custom(f'{batting_avg:.1f}')}\n"
-            f"• High Score: {stats['highest_score']}\n"
-            f"• 4s / 6s: {stats['boundaries']} / {stats['sixes']}\n\n"
+            f"• High Score: {highest_score}\n"
+            f"• 4s / 6s: {boundaries} / {sixes}\n\n"
             
             f"⚾ *Bowling*\n"
-            f"• Wickets: {stats['wickets']}\n"
-            f"• Dot Balls: {stats['dot_balls']}\n"
+            f"• Wickets: {wickets}\n"
+            f"• Dot Balls: {dot_balls}\n"
         )
 
         # Enhanced interactive buttons
@@ -7844,69 +7860,69 @@ async def update_career_stats(winner_id: str, loser_id: str, winner_gain: int, l
     try:
         with DatabaseConnection() as conn:
             with conn.cursor(cursor_factory=DictCursor) as cur:
-            # Get current stats
-            winner_stats = await get_career_stats(winner_id)
-            loser_stats = await get_career_stats(loser_id)
-            
-            if not winner_stats or not loser_stats:
-                return None, None
-            
-            # Calculate new ratings
-            new_winner_rating = max(0, winner_stats['rating'] + winner_gain)
-            new_loser_rating = max(0, loser_stats['rating'] - loser_loss)
-            
-            # Update winner
-            cur.execute("""
-                UPDATE career_stats SET
-                    username = %s,
-                    rating = %s,
-                    rank_tier = %s,
-                    total_matches = total_matches + 1,
-                    wins = wins + 1,
-                    current_streak = CASE 
-                        WHEN streak_type = 'win' THEN current_streak + 1
-                        ELSE 1
-                    END,
-                    streak_type = 'win',
-                    highest_rating = GREATEST(highest_rating, %s),
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE user_id = %s
-                RETURNING *
-            """, (
-                winner_name, 
-                new_winner_rating, 
-                get_rank_tier(new_winner_rating),
-                new_winner_rating,
-                winner_id
-            ))
-            winner_result = dict(cur.fetchone())
-            
-            # Update loser
-            cur.execute("""
-                UPDATE career_stats SET
-                    username = %s,
-                    rating = %s,
-                    rank_tier = %s,
-                    total_matches = total_matches + 1,
-                    losses = losses + 1,
-                    current_streak = CASE 
-                        WHEN streak_type = 'loss' THEN current_streak + 1
-                        ELSE 1
-                    END,
-                    streak_type = 'loss',
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE user_id = %s
-                RETURNING *
-            """, (
-                loser_name,
-                new_loser_rating,
-                get_rank_tier(new_loser_rating),
-                loser_id
-            ))
-            loser_result = dict(cur.fetchone())
-            
-            conn.commit()
-            return winner_result, loser_result
+                # Get current stats
+                winner_stats = await get_career_stats(winner_id)
+                loser_stats = await get_career_stats(loser_id)
+                
+                if not winner_stats or not loser_stats:
+                    return None, None
+                
+                # Calculate new ratings
+                new_winner_rating = max(0, winner_stats['rating'] + winner_gain)
+                new_loser_rating = max(0, loser_stats['rating'] - loser_loss)
+                
+                # Update winner
+                cur.execute("""
+                    UPDATE career_stats SET
+                        username = %s,
+                        rating = %s,
+                        rank_tier = %s,
+                        total_matches = total_matches + 1,
+                        wins = wins + 1,
+                        current_streak = CASE 
+                            WHEN streak_type = 'win' THEN current_streak + 1
+                            ELSE 1
+                        END,
+                        streak_type = 'win',
+                        highest_rating = GREATEST(highest_rating, %s),
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE user_id = %s
+                    RETURNING *
+                """, (
+                    winner_name, 
+                    new_winner_rating, 
+                    get_rank_tier(new_winner_rating),
+                    new_winner_rating,
+                    winner_id
+                ))
+                winner_result = dict(cur.fetchone())
+                
+                # Update loser
+                cur.execute("""
+                    UPDATE career_stats SET
+                        username = %s,
+                        rating = %s,
+                        rank_tier = %s,
+                        total_matches = total_matches + 1,
+                        losses = losses + 1,
+                        current_streak = CASE 
+                            WHEN streak_type = 'loss' THEN current_streak + 1
+                            ELSE 1
+                        END,
+                        streak_type = 'loss',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE user_id = %s
+                    RETURNING *
+                """, (
+                    loser_name,
+                    new_loser_rating,
+                    get_rank_tier(new_loser_rating),
+                    loser_id
+                ))
+                loser_result = dict(cur.fetchone())
+                
+                conn.commit()
+                return winner_result, loser_result
             
     except Exception as e:
         logger.error(f"Error updating career stats: {e}")
@@ -7918,54 +7934,54 @@ async def save_ranked_match(game: dict, winner_id: str, loser_id: str,
     try:
         with DatabaseConnection() as conn:
             with conn.cursor() as cur:
-            # Get ratings before match
-            winner_stats = await get_career_stats(winner_id)
-            loser_stats = await get_career_stats(loser_id)
-            
-            if not winner_stats or not loser_stats:
-                return False
-            
-            # Determine which player is player1/player2
-            is_batsman_winner = (winner_id == game.get('batsman'))
-            player1_id = game.get('batsman')
-            player2_id = game.get('bowler')
-            
-            # Insert match record
-            cur.execute("""
-                INSERT INTO ranked_matches (
-                    player1_id, player2_id, winner_id, match_type,
-                    p1_rating_before, p1_rating_after, p1_rating_change,
-                    p2_rating_before, p2_rating_after, p2_rating_change,
-                    p1_score, p1_wickets, p1_overs,
-                    p2_score, p2_wickets, p2_overs,
+                # Get ratings before match
+                winner_stats = await get_career_stats(winner_id)
+                loser_stats = await get_career_stats(loser_id)
+                
+                if not winner_stats or not loser_stats:
+                    return False
+                
+                # Determine which player is player1/player2
+                is_batsman_winner = (winner_id == game.get('batsman'))
+                player1_id = game.get('batsman')
+                player2_id = game.get('bowler')
+                
+                # Insert match record
+                cur.execute("""
+                    INSERT INTO ranked_matches (
+                        player1_id, player2_id, winner_id, match_type,
+                        p1_rating_before, p1_rating_after, p1_rating_change,
+                        p2_rating_before, p2_rating_after, p2_rating_change,
+                        p1_score, p1_wickets, p1_overs,
+                        p2_score, p2_wickets, p2_overs,
+                        performance_bonus
+                    ) VALUES (
+                        %s, %s, %s, 'ranked',
+                        %s, %s, %s,
+                        %s, %s, %s,
+                        %s, %s, %s,
+                        %s, %s, %s,
+                        %s
+                    )
+                """, (
+                    player1_id, player2_id, winner_id,
+                    winner_stats['rating'] if is_batsman_winner else loser_stats['rating'],
+                    winner_stats['rating'] + winner_gain if is_batsman_winner else loser_stats['rating'] - loser_loss,
+                    winner_gain if is_batsman_winner else -loser_loss,
+                    loser_stats['rating'] if is_batsman_winner else winner_stats['rating'],
+                    loser_stats['rating'] - loser_loss if is_batsman_winner else winner_stats['rating'] + winner_gain,
+                    -loser_loss if is_batsman_winner else winner_gain,
+                    game['score'].get('innings1', 0),
+                    game.get('first_innings_wickets', 0),
+                    game.get('first_innings_balls', 0) / 6.0,
+                    game['score'].get('innings2', 0),
+                    game['wickets'],
+                    game['balls'] / 6.0,
                     performance_bonus
-                ) VALUES (
-                    %s, %s, %s, 'ranked',
-                    %s, %s, %s,
-                    %s, %s, %s,
-                    %s, %s, %s,
-                    %s, %s, %s,
-                    %s
-                )
-            """, (
-                player1_id, player2_id, winner_id,
-                winner_stats['rating'] if is_batsman_winner else loser_stats['rating'],
-                winner_stats['rating'] + winner_gain if is_batsman_winner else loser_stats['rating'] - loser_loss,
-                winner_gain if is_batsman_winner else -loser_loss,
-                loser_stats['rating'] if is_batsman_winner else winner_stats['rating'],
-                loser_stats['rating'] - loser_loss if is_batsman_winner else winner_stats['rating'] + winner_gain,
-                -loser_loss if is_batsman_winner else winner_gain,
-                game['score'].get('innings1', 0),
-                game.get('first_innings_wickets', 0),
-                game.get('first_innings_balls', 0) / 6.0,
-                game['score'].get('innings2', 0),
-                game['wickets'],
-                game['balls'] / 6.0,
-                performance_bonus
-            ))
-            
-            conn.commit()
-            return True
+                ))
+                
+                conn.commit()
+                return True
     
     except Exception as e:
         logger.error(f"Error saving ranked match: {e}")
@@ -8405,43 +8421,43 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     try:
-        conn = get_db_connection()
-        if not conn:
-            await update.message.reply_text(
-                "❌ *Database Error*\n"
-                "Unable to load leaderboard\\. Try again later\\.",
-                parse_mode=ParseMode.MARKDOWN_V2
-            )
-            return
-        
-        with conn.cursor(cursor_factory=DictCursor) as cur:
-            # Get top 10 players
-            cur.execute("""
-                SELECT user_id, username, rating, rank_tier, total_matches, wins, losses
-                FROM career_stats
-                WHERE total_matches > 0
-                ORDER BY rating DESC
-                LIMIT 10
-            """)
-            top_players = cur.fetchall()
+        with DatabaseConnection() as conn:
+            if not conn:
+                await update.message.reply_text(
+                    "❌ *Database Error*\n"
+                    "Unable to load leaderboard\\. Try again later\\.",
+                    parse_mode=ParseMode.MARKDOWN_V2
+                )
+                return
             
-            # Get user's rank if not in top 10
-            cur.execute("""
-                SELECT COUNT(*) + 1 as rank
-                FROM career_stats
-                WHERE rating > (SELECT rating FROM career_stats WHERE user_id = %s)
-                AND total_matches > 0
-            """, (user_id,))
-            user_rank_result = cur.fetchone()
-            user_rank = user_rank_result['rank'] if user_rank_result else None
-            
-            # Get user's stats
-            cur.execute("""
-                SELECT username, rating, rank_tier, total_matches, wins, losses
-                FROM career_stats
-                WHERE user_id = %s
-            """, (user_id,))
-            user_stats = cur.fetchone()
+            with conn.cursor(cursor_factory=DictCursor) as cur:
+                # Get top 10 players
+                cur.execute("""
+                    SELECT user_id, username, rating, rank_tier, total_matches, wins, losses
+                    FROM career_stats
+                    WHERE total_matches > 0
+                    ORDER BY rating DESC
+                    LIMIT 10
+                """)
+                top_players = cur.fetchall()
+                
+                # Get user's rank if not in top 10
+                cur.execute("""
+                    SELECT COUNT(*) + 1 as rank
+                    FROM career_stats
+                    WHERE rating > (SELECT rating FROM career_stats WHERE user_id = %s)
+                    AND total_matches > 0
+                """, (user_id,))
+                user_rank_result = cur.fetchone()
+                user_rank = user_rank_result['rank'] if user_rank_result else None
+                
+                # Get user's stats
+                cur.execute("""
+                    SELECT username, rating, rank_tier, total_matches, wins, losses
+                    FROM career_stats
+                    WHERE user_id = %s
+                """, (user_id,))
+                user_stats = cur.fetchone()
         
         if not top_players:
             await update.message.reply_text(
@@ -8469,16 +8485,15 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             wins = player['wins']
             losses = player['losses']
             total = player['total_matches']
-            win_rate = int((wins / total * 100)) if total > 0 else 0
             
-            # Escape username
+            # Escape username and rank
             username_escaped = escape_markdown_v2_custom(username)
             rank_escaped = escape_markdown_v2_custom(rank_tier)
             
             leaderboard_text += (
                 f"{medal} *\\#{idx}* {username_escaped}\n"
                 f"• Rating: {rating} \\({rank_escaped}\\)\n"
-                f"• Record: {wins}W – {losses}L\n\n"
+                f"• Record: {wins}W \\- {losses}L\n\n"
             )
         
         # Add user's position if not in top 10
@@ -8488,8 +8503,6 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             rank_escaped = escape_markdown_v2_custom(user_stats['rank_tier'])
             wins = user_stats['wins']
             losses = user_stats['losses']
-            total = user_stats['total_matches']
-            win_rate = int((wins / total * 100)) if total > 0 else 0
             
             leaderboard_text += (
                 f"🎯 *Your Rank: \\#{user_rank}*"
@@ -8507,9 +8520,6 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Failed to load leaderboard\\.",
             parse_mode=ParseMode.MARKDOWN_V2
         )
-    finally:
-        if conn:
-            return_db_connection(conn)
 
 async def ranks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show all rank tiers and rating thresholds"""
@@ -9316,7 +9326,7 @@ async def challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"<a href='tg://user?id={target_id}'>{target_name}</a>\n"
             f"Rating: {target_stats['rating']} ({target_rank})\n\n"
             f"<b>🏏 MATCH FORMAT</b>\n"
-            f"Mode: Survival (1 wicket, unlimited overs)\n"
+            f"Mode: Blitz (3 overs, 3 wickets)\n"
             f"Type: Ranked (Rated Match)\n\n"
             f"<i>⏳ <a href='tg://user?id={target_id}'>{target_name}</a>, you have 60 seconds to respond...</i>"
         )
@@ -9572,7 +9582,7 @@ async def handle_challenge_accept(update: Update, context: ContextTypes.DEFAULT_
         f"🔹 <a href='tg://user?id={challenger_id}'>{challenger_name}</a> ({challenger_rating})\n"
         f"🔸 <a href='tg://user?id={target_id}'>{target_name}</a> ({target_rating})\n\n"
         f"<b>🏏 FORMAT</b>\n"
-        f"Mode: Survival (1 wicket, unlimited overs)\n"
+        f"Mode: Blitz (3 overs, 3 wickets)\n"
         f"Type: Ranked (Rated Match)\n\n"
         f"<b>🎲 TOSS TIME</b>\n"
         f"<i><a href='tg://user?id={challenger_id}'>{challenger_name}</a>, choose ODD or EVEN!</i>"
@@ -9848,14 +9858,23 @@ async def update_player_stats(user_id: str, **stats) -> bool:
                 ON CONFLICT (telegram_id) DO NOTHING
             """, (user_id,))
             
+            # Get current highest score to compare
+            cur.execute("""
+                SELECT highest_score FROM player_stats WHERE user_id = %s
+            """, (user_id,))
+            result = cur.fetchone()
+            current_highest = result[0] if result else 0
+            
             # Update all stats in a single query
+            new_highest = max(current_highest, stats.get('runs_scored', 0))
+            
             cur.execute("""
                 INSERT INTO player_stats 
                     (user_id, matches_played, matches_won, total_runs_scored, 
                      total_balls_faced, total_wickets_taken, total_boundaries,
-                     total_sixes, dot_balls) 
+                     total_sixes, dot_balls, highest_score) 
                 VALUES 
-                    (%s, 1, %s, %s, %s, %s, %s, %s, %s)
+                    (%s, 1, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (user_id) DO UPDATE SET
                     matches_played = player_stats.matches_played + 1,
                     matches_won = player_stats.matches_won + %s,
@@ -9865,23 +9884,26 @@ async def update_player_stats(user_id: str, **stats) -> bool:
                     total_boundaries = player_stats.total_boundaries + %s,
                     total_sixes = player_stats.total_sixes + %s,
                     dot_balls = player_stats.dot_balls + %s,
+                    highest_score = GREATEST(player_stats.highest_score, %s),
                     last_updated = CURRENT_TIMESTAMP
             """, (
                 user_id, 
-                int(stats['is_winner']),
-                stats['runs_scored'],
-                stats['balls_faced'],
-                stats['wickets'],
-                stats['boundaries'],
-                stats['sixes'],
-                stats['dot_balls'],
-                int(stats['is_winner']),
-                stats['runs_scored'],
-                stats['balls_faced'],
-                stats['wickets'],
-                stats['boundaries'],
-                stats['sixes'],
-                stats['dot_balls']
+                int(stats.get('is_winner', 0)),
+                stats.get('runs_scored', 0),
+                stats.get('balls_faced', 0),
+                stats.get('wickets', 0),
+                stats.get('boundaries', 0),
+                stats.get('sixes', 0),
+                stats.get('dot_balls', 0),
+                new_highest,
+                int(stats.get('is_winner', 0)),
+                stats.get('runs_scored', 0),
+                stats.get('balls_faced', 0),
+                stats.get('wickets', 0),
+                stats.get('boundaries', 0),
+                stats.get('sixes', 0),
+                stats.get('dot_balls', 0),
+                stats.get('runs_scored', 0)
             ))
             conn.commit()
             return True
