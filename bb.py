@@ -5698,8 +5698,13 @@ async def recent_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     wickets_remaining = 10 - opp_wickets
                     result = f"Lost by {wickets_remaining} wkts"
             
-            # Format rating change
-            change_str = f"+{rating_change}" if rating_change > 0 else str(rating_change)
+            # Format rating change - escape the + or - sign
+            if rating_change > 0:
+                change_str = f"\\+{rating_change}"
+            elif rating_change < 0:
+                change_str = f"\\-{abs(rating_change)}"
+            else:
+                change_str = "0"
             
             match_date = match['match_date'].strftime("%d %b")
             
@@ -5708,7 +5713,7 @@ async def recent_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"vs {escape_markdown_v2_custom(opponent_name)}\n"
                 f"Score: {target_score}/{target_wickets} vs {opp_score}/{opp_wickets}\n"
                 f"{escape_markdown_v2_custom(result)}\n"
-                f"Rating: {rating_before} \\→ {rating_after} \\({escape_markdown_v2_custom(change_str)}\\)\n\n"
+                f"Rating: {rating_before} → {rating_after} \\({change_str}\\)\n\n"
             )
         
         await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
