@@ -1,0 +1,32 @@
+start - Register your account and get started
+help - View all available commands
+gameon - Start a practice match
+ranked - Join ranked matchmaking queue
+challenge - Challenge a player to 1v1 match
+cancel_queue - Leave the ranked matchmaking queue
+profile - View your detailed statistics
+career - Check your rating and rank tier
+scorecard - View your saved match history
+save - Save current match result
+leaderboard - View top players rankings
+ranks - View all rank tiers information
+rankedinfo - Complete guide to ranking system
+addadmin - Add new bot administrator
+removeadmin - Remove admin privileges
+listadmins - List all bot administrators
+blacklist - Ban user from using the bot
+unban - Unban previously banned user
+broadcast - Broadcast message to all users
+stopgames - Stop all active games
+maintenance - Toggle maintenance mode
+botstats - View comprehensive bot statistics
+resetstats - Reset player statistics
+testdb - Test database connection
+listusers - List all registered users
+listgroups - List all authorized groups
+userstats - View user and group statistics
+flaggedmatches - View suspicious activities
+reviewmatch - Review flagged suspicious activity
+clearflag - Clear false positive flag
+suspendrating - Suspend user rating changes
+unsuspendrating - Remove rating suspension
