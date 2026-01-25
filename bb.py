@@ -3267,7 +3267,7 @@ async def handle_innings_change(msg, game: dict, game_id: str):
         f"🏁 *INNINGS COMPLETE*\n"
         f"━━━━━━━━━━━━━━━━\n\n"
         f"{batsman_out_text}"
-        f"• *Score:* {game['first_innings_score']}/{game['first_innings_wickets']} ({game['first_innings_overs']})\n"
+        f"• *Score:* {game['first_innings_score']}/{game['first_innings_wickets']} \\({game['first_innings_overs']}\\)\n"
         f"• *Target:* {game['target']} runs\n"
         f"• *Required Rate:* {game['target'] / game['max_overs']:.2f}\n\n"
         f"🎮 *{escape_markdown_v2_custom(game['batsman_name'])}'s turn to bat\\!*",
