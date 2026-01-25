@@ -3258,19 +3258,32 @@ async def handle_innings_change(msg, game: dict, game_id: str):
     
     # Determine if batsman was out or innings ended normally (use stored name from before swap)
     batsman_out_text = ""
+    batsman_name_escaped = escape_markdown_v2_custom(game['first_innings_batsman_name'])
+    batsman_next_escaped = escape_markdown_v2_custom(game['batsman_name'])
+    # Prepare overs string and escape reserved chars
+    overs_raw = f"{game['first_innings_overs']}"
+    overs_escaped = overs_raw.replace('.', '\\.')
+    # Prepare score string
+    score_str = f"{game['first_innings_score']}/{game['first_innings_wickets']}"
+    # Prepare required rate string and escape period
+    required_rate_raw = f"{game['target'] / game['max_overs']:.2f}"
+    required_rate_escaped = required_rate_raw.replace('.', '\\.')
+    # Prepare target string
+    target_raw = f"{game['target']}"
+    target_escaped = target_raw.replace('-', '\\-').replace('+', '\\+')
+    # Escape exclamation and period in batsman_out_text
     if game['wickets'] >= game.get('max_wickets', 10):
-        batsman_out_text = f"🏏 *{escape_markdown_v2_custom(game['first_innings_batsman_name'])}* got out\\!\n\n"
+        batsman_out_text = f"🏏 *{batsman_name_escaped}* got out\\!\n\n"
     elif game['balls'] >= game['max_overs'] * 6:
-        batsman_out_text = f"🏏 Innings ended\\. *{escape_markdown_v2_custom(game['first_innings_batsman_name'])}* finished not out\\.\n\n"
-    
+        batsman_out_text = f"🏏 Innings ended\\. *{batsman_name_escaped}* finished not out\\.\n\n"
     await safe_edit_message(msg,
         f"🏁 *INNINGS COMPLETE*\n"
         f"━━━━━━━━━━━━━━━━\n\n"
         f"{batsman_out_text}"
-        f"• *Score:* {game['first_innings_score']}/{game['first_innings_wickets']} \\({game['first_innings_overs']}\\)\n"
-        f"• *Target:* {game['target']} runs\n"
-        f"• *Required Rate:* {game['target'] / game['max_overs']:.2f}\n\n"
-        f"🎮 *{escape_markdown_v2_custom(game['batsman_name'])}'s turn to bat\\!*",
+        f"• *Score:* {score_str} \\({overs_escaped}\\)\n"
+        f"• *Target:* {target_escaped} runs\n"
+        f"• *Required Rate:* {required_rate_escaped}\n\n"
+        f"🎮 *{batsman_next_escaped}'s turn to bat\\!*",
         keyboard=InlineKeyboardMarkup(get_batting_keyboard(game_id)))
 
 # Update handle_game_end to format match summary properly
