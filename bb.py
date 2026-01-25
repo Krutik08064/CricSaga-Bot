@@ -3256,12 +3256,12 @@ async def handle_innings_change(msg, game: dict, game_id: str):
     
     innings_commentary = random.choice(COMMENTARY_PHRASES['innings_end'])
     
-    # Determine if batsman was out or innings ended normally
+    # Determine if batsman was out or innings ended normally (use stored name from before swap)
     batsman_out_text = ""
     if game['wickets'] >= game.get('max_wickets', 10):
-        batsman_out_text = f"🏏 *{escape_markdown_v2_custom(game['batsman_name'])}* got out\\!\n\n"
+        batsman_out_text = f"🏏 *{escape_markdown_v2_custom(game['first_innings_batsman_name'])}* got out\\!\n\n"
     elif game['balls'] >= game['max_overs'] * 6:
-        batsman_out_text = f"🏏 Innings ended\\. *{escape_markdown_v2_custom(game['batsman_name'])}* finished not out\\.\n\n"
+        batsman_out_text = f"🏏 Innings ended\\. *{escape_markdown_v2_custom(game['first_innings_batsman_name'])}* finished not out\\.\n\n"
     
     await safe_edit_message(msg,
         f"🏁 *INNINGS COMPLETE*\n"
