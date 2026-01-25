@@ -3273,12 +3273,17 @@ async def handle_innings_change(msg, game: dict, game_id: str):
     target_escaped = target_raw.replace('-', '\\-').replace('+', '\\+')
     # Escape exclamation and period in batsman_out_text
     if game['wickets'] >= game.get('max_wickets', 10):
-        batsman_out_text = f"🏏 *{batsman_name_escaped}* got out\\!\n\n"
+        batsman_out_text = f"🏏 *{batsman_name_escaped}* got out\!\n\n"
     elif game['balls'] >= game['max_overs'] * 6:
         batsman_out_text = f"🏏 Innings ended\\. *{batsman_name_escaped}* finished not out\\.\n\n"
+
+    # Add 1st innings batsman name line (always shown)
+    batsman_line = f"👤 *Batsman:* {batsman_name_escaped}\n"
+
     await safe_edit_message(msg,
         f"🏁 *INNINGS COMPLETE*\n"
         f"━━━━━━━━━━━━━━━━\n\n"
+        f"{batsman_line}"
         f"{batsman_out_text}"
         f"• *Score:* {score_str} \\({overs_escaped}\\)\n"
         f"• *Target:* {target_escaped} runs\n"
