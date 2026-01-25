@@ -3255,13 +3255,22 @@ async def handle_innings_change(msg, game: dict, game_id: str):
     game['bowler_name'] = temp_batsman_name
     
     innings_commentary = random.choice(COMMENTARY_PHRASES['innings_end'])
+    
+    # Determine if batsman was out or innings ended normally
+    batsman_out_text = ""
+    if game['wickets'] >= game.get('max_wickets', 10):
+        batsman_out_text = f"🏏 *{escape_markdown_v2_custom(game['batsman_name'])}* got out\\!\n\n"
+    elif game['balls'] >= game['max_overs'] * 6:
+        batsman_out_text = f"🏏 Innings ended\\. *{escape_markdown_v2_custom(game['batsman_name'])}* finished not out\\.\n\n"
+    
     await safe_edit_message(msg,
         f"🏁 *INNINGS COMPLETE*\n"
         f"━━━━━━━━━━━━━━━━\n\n"
+        f"{batsman_out_text}"
         f"• *Score:* {game['first_innings_score']}/{game['first_innings_wickets']} ({game['first_innings_overs']})\n"
         f"• *Target:* {game['target']} runs\n"
         f"• *Required Rate:* {game['target'] / game['max_overs']:.2f}\n\n"
-        f"🎮 *{game['batsman_name']}'s turn to bat!*",
+        f"🎮 *{escape_markdown_v2_custom(game['batsman_name'])}'s turn to bat\\!*",
         keyboard=InlineKeyboardMarkup(get_batting_keyboard(game_id)))
 
 # Update handle_game_end to format match summary properly
