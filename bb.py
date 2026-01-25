@@ -2497,9 +2497,10 @@ async def gameon(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
+        # Store the creator's ID in the callback data
         keyboard = [
-            [InlineKeyboardButton("🏏 Player vs Player", callback_data="matchtype_pvp")],
-            [InlineKeyboardButton("👥 Team vs Team", callback_data="matchtype_team")]
+            [InlineKeyboardButton("🏏 Player vs Player", callback_data=f"matchtype_pvp_{user_id}")],
+            [InlineKeyboardButton("👥 Team vs Team", callback_data=f"matchtype_team_{user_id}")]
         ]
 
         await update.message.reply_text(
@@ -2592,10 +2593,12 @@ async def handle_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass  # Query too old, continue anyway
     
     try:
-        # Parse callback_data: "mode_{game_id}_{mode}"
+        # Parse callback_data: "mode_{game_id}_{mode}_{creator_id}" or "mode_{game_id}_{mode}"
         parts = query.data.split('_')
-        mode = parts[-1]
-        game_id = '_'.join(parts[1:-1])
+        mode = parts[-2] if len(parts) > 3 else parts[-1]
+        creator_id_from_data = parts[-1] if len(parts) > 3 else None
+        game_id = '_'.join(parts[1:-2]) if len(parts) > 3 else '_'.join(parts[1:-1])
+        
         if game_id not in games:
             await query.edit_message_text(
                 escape_markdown_v2_custom("❌ Game not found!"),
@@ -7523,28 +7526,45 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sixes = player_stats.get('sixes', 0)
         wickets = player_stats.get('wickets', 0)
         dot_balls = player_stats.get('dot_balls', 0)
+        
+        # Calculate normal mode stats (total - ranked)
+        normal_matches = player_stats.get('matches_played', 0) - total_matches
+        normal_runs = total_runs  # Approximate, we'll track this better in future
 
         profile_text = (
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
             f"👤 *PLAYER PROFILE*\n"
-            f"━━━━━━━━━━━━━━━━\n\n"
-            f"🏏 Player: {escape_markdown_v2_custom(user_name)}\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🏏 *{escape_markdown_v2_custom(user_name)}*\n\n"
             
-            f"📊 *Career Stats*\n"
-            f"• Rating: {rating}\n"
-            f"• Rank: {escape_markdown_v2_custom(rank_tier)}\n"
-            f"• Matches: {total_matches}\n"
-            f"• Record: {wins}W \\- {losses}L\n"
-            f"• Win Rate: {escape_markdown_v2_custom(f'{win_rate:.0f}%')}\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🏆 *RANKED MODE*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"⚡ Rating: *{rating}*\n"
+            f"🎖️ Rank: {escape_markdown_v2_custom(rank_tier)}\n"
+            f"🎮 Matches: {total_matches}\n"
+            f"✅ Wins: {wins} │ ❌ Losses: {losses}\n"
+            f"📊 Win Rate: {escape_markdown_v2_custom(f'{win_rate:.0f}%')}\n\n"
             
-            f"🏏 *Batting*\n"
-            f"• Total Runs: {total_runs}\n"
-            f"• Avg: {escape_markdown_v2_custom(f'{batting_avg:.1f}')}\n"
-            f"• High Score: {highest_score}\n"
-            f"• 4s / 6s: {boundaries} / {sixes}\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🎯 *NORMAL MODE*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎮 Matches: {normal_matches}\n\n"
             
-            f"⚾ *Bowling*\n"
-            f"• Wickets: {wickets}\n"
-            f"• Dot Balls: {dot_balls}\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🏏 *BATTING STATS*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📈 Total Runs: *{total_runs}*\n"
+            f"📊 Average: {escape_markdown_v2_custom(f'{batting_avg:.1f}')}\n"
+            f"🎯 High Score: *{highest_score}*\n"
+            f"💥 Boundaries: {boundaries} 4s │ {sixes} 6s\n\n"
+            
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "⚾ *BOWLING STATS*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎯 Wickets: *{wickets}*\n"
+            f"🔒 Dot Balls: {dot_balls}\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
         )
 
         # Enhanced interactive buttons
@@ -8480,44 +8500,62 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        # Build leaderboard message
+        # Build leaderboard message with improved UI
         leaderboard_text = (
-            "🏆 *TOP PLAYERS*\n"
-            "━━━━━━━━━━━━━━━━\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🏆 *GLOBAL LEADERBOARD* 🏆\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "👑 *Top Players*\n\n"
         )
         
         medal_emojis = ["🥇", "🥈", "🥉"]
         
         for idx, player in enumerate(top_players, 1):
-            medal = medal_emojis[idx-1] if idx <= 3 else f"{idx}️⃣"
+            medal = medal_emojis[idx-1] if idx <= 3 else f"⚡"
             username = player['username']
             rating = player['rating']
             rank_tier = player['rank_tier']
-            wins = player['wins']
-            losses = player['losses']
             total = player['total_matches']
             
             # Escape username and rank
             username_escaped = escape_markdown_v2_custom(username)
             rank_escaped = escape_markdown_v2_custom(rank_tier)
             
+            # Create star rating visual based on rating
+            if rating >= 2000:
+                stars = "⭐⭐⭐⭐⭐"
+            elif rating >= 1800:
+                stars = "⭐⭐⭐⭐"
+            elif rating >= 1600:
+                stars = "⭐⭐⭐"
+            elif rating >= 1400:
+                stars = "⭐⭐"
+            elif rating >= 1200:
+                stars = "⭐"
+            else:
+                stars = "🔸"
+            
             leaderboard_text += (
                 f"{medal} *\\#{idx}* {username_escaped}\n"
-                f"• Rating: {rating} \\({rank_escaped}\\)\n"
-                f"• Record: {wins}W \\- {losses}L\n\n"
+                f"   🎯 *{rating}* {stars}\n"
+                f"   {rank_escaped} │ {total} matches\n\n"
             )
+        
+        leaderboard_text += "━━━━━━━━━━━━━━━━━━━━━━\n"
         
         # Add user's position if not in top 10
         if user_rank and user_rank > 10 and user_stats:
-            leaderboard_text += "━━━━━━━━━━━━━━━━━━━━━\n"
             username_escaped = escape_markdown_v2_custom(user_stats['username'])
             rank_escaped = escape_markdown_v2_custom(user_stats['rank_tier'])
-            wins = user_stats['wins']
-            losses = user_stats['losses']
+            user_rating = user_stats['rating']
             
             leaderboard_text += (
-                f"🎯 *Your Rank: \\#{user_rank}*"
+                f"\n📍 *Your Position*\n"
+                f"   Rank: *\\#{user_rank}*\n"
+                f"   Rating: *{user_rating}*\n"
+                f"   Tier: {rank_escaped}\n"
             )
+
         
         await update.message.reply_text(
             leaderboard_text,
@@ -10041,7 +10079,19 @@ async def handle_match_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     try:
-        match_type = query.data.split('_')[1]  # Just get the type, no need to unpack 3 values
+        # Extract match type and creator ID
+        parts = query.data.split('_')
+        match_type = parts[1]
+        creator_id = parts[2] if len(parts) > 2 else None
+        
+        # Check if the person clicking is the creator
+        current_user_id = str(query.from_user.id)
+        if creator_id and current_user_id != creator_id:
+            await query.answer(
+                "❌ Only the game creator can configure the match!",
+                show_alert=True
+            )
+            return
         
         if match_type == "team":
             # Team vs Team feature - Coming Soon
@@ -10059,7 +10109,7 @@ async def handle_match_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "Stay tuned for updates!"
                 ),
                 reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_menu")
+                    InlineKeyboardButton("🔙 Back to Menu", callback_data=f"back_to_menu_{creator_id}")
                 ]]),
                 parse_mode=ParseMode.MARKDOWN_V2
             )
@@ -10079,13 +10129,13 @@ async def handle_match_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'status': 'config'
             }
             
-            # Show game mode selection
+            # Show game mode selection - pass creator_id along
             keyboard = []
             for mode in GAME_MODES:
                 keyboard.append([
                     InlineKeyboardButton(
                         f"{GAME_MODES[mode]['icon']} {GAME_MODES[mode]['title']}", 
-                        callback_data=f"mode_{game_id}_{mode}"
+                        callback_data=f"mode_{game_id}_{mode}_{creator_id}"
                     )
                 ])
             
@@ -10120,10 +10170,21 @@ async def handle_back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     
     try:
-        keyboard = [
-            [InlineKeyboardButton("🏏 Player vs Player", callback_data="matchtype_pvp")],
-            [InlineKeyboardButton("👥 Team vs Team", callback_data="matchtype_team")]
-        ]
+        # Extract creator ID if present
+        parts = query.data.split('_')
+        creator_id = parts[-1] if len(parts) > 3 else None
+        
+        # If creator_id exists, pass it along in the buttons
+        if creator_id:
+            keyboard = [
+                [InlineKeyboardButton("🏏 Player vs Player", callback_data=f"matchtype_pvp_{creator_id}")],
+                [InlineKeyboardButton("👥 Team vs Team", callback_data=f"matchtype_team_{creator_id}")]
+            ]
+        else:
+            keyboard = [
+                [InlineKeyboardButton("🏏 Player vs Player", callback_data="matchtype_pvp")],
+                [InlineKeyboardButton("👥 Team vs Team", callback_data="matchtype_team")]
+            ]
         
         await query.edit_message_text(
             escape_markdown_v2_custom(
