@@ -151,9 +151,9 @@ MESSAGE_STYLES = {
 GAME_MODES = {
     'classic': {
         'icon': "🏏",
-        'title': "CLASSIC",
+        'title': "Classic Cricket",
         'description': [
-            "Set wickets & play till all out"
+            "⚖️ Limited Overs & Wickets",
         ],
         'max_wickets': 10,
         'max_overs': 20,
@@ -161,9 +161,10 @@ GAME_MODES = {
     },
     'quick': {
         'icon': "⚡",
-        'title': "QUICK BLITZ",
+        'title': "Quick Match",
         'description': [
-            "Set overs, unlimited wickets"
+            "♾️ Unlimited Wickets",
+            "⏱️ Limited overs"
         ],
         'max_wickets': float('inf'),
         'max_overs': 5,
@@ -171,9 +172,11 @@ GAME_MODES = {
     },
     'survival': {
         'icon': "🎯",
-        'title': "SURVIVAL",
+        'title': "Survival Mode",
         'description': [
-            "1 Wicket \| Infinite Overs"
+            "💀 One Wicket Challenge",
+            "♾️ Unlimited Overs",
+            "🔥 Last Man Standing"
         ],
         'max_wickets': 1,
         'max_overs': float('inf'),
@@ -393,7 +396,7 @@ def check_admin(user_id: str) -> bool:
 
 def escape_markdown_v2_custom(text: str) -> str:
     """Escape special characters for Markdown V2 format with custom handling"""
-    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    special_chars = ['_', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
     for char in special_chars:
         text = text.replace(char, f"\\{char}")
     return text
@@ -2501,13 +2504,13 @@ async def gameon(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
 
         await update.message.reply_text(
-            "🏟️  *CRICKET SAGA ARENA*\n"
-            "══════════════════════\n\n"
-            "⚔️ *PLAYER VS PLAYER*\n"
-            "Challenge a friend to a 1v1 duel\\.\n\n"
-            "👥 *TEAM BATTLE*\n"
-            "Squad play\\. Captains lead the charge\\.\n\n"
-            "👇 *Choose match type:*",
+            "🎮  *CRICKET SAGA ARÉNA*  🎮\n"
+            "═══════════════════════\n"
+            "✨ *NEW MATCH SETUP*\n\n"
+            "🔥 *Choose Your Challenge:*\n"
+            "⚔️ *1v1 Duel* • Battle a friend\n"
+            "👥 *Team Battle* • Squad vs Squad\n\n"
+            "👇 *Select Mode Below:*",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode=ParseMode.MARKDOWN_V2
         )
@@ -3305,9 +3308,9 @@ async def handle_innings_change(msg, game: dict, game_id: str):
     target_escaped = target_raw.replace('-', '\\-').replace('+', '\\+')
     # Escape exclamation and period in batsman_out_text
     if game['wickets'] >= game.get('max_wickets', 10):
-        batsman_out_text = f"🏏 *{batsman_name_escaped}* got out\\!\\n\\n"
+        batsman_out_text = f"🏏 *{batsman_name_escaped}* got out\!\n\n"
     elif game['balls'] >= game['max_overs'] * 6:
-        batsman_out_text = f"🏏 Innings ended\\. *{batsman_name_escaped}* finished not out\\.\\n\\n"
+        batsman_out_text = f"🏏 Innings ended\\. *{batsman_name_escaped}* finished not out\\.\n\n"
 
     # Add 1st innings batsman name line
     batsman_line = f"👤 *Batsman:* {batsman_name_escaped}\n"
@@ -7583,7 +7586,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             "🏏 *CAREER TOTALS*\n"
             "────────────────\n"
-            f"🏃 *Runs:*    {total_runs}  \|  *High:* {highest_score}\n"
+            f"🏃 *Runs:*    {total_runs}  |  *High:* {highest_score}\n"
             f"💥 *Bound:*   {boundaries}/{sixes}\n"
             f"🎯 *Wickets:* {wickets}"
         )
@@ -8542,7 +8545,7 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             leaderboard_text += (
                 f"{medal} *\\#{idx}* {username_escaped}\n"
-                f"   ⚡ *{rating}* \\({rank_tier_escaped}\\) \| {total} matches\n\n"
+                f"   ⚡ *{rating}* \\({rank_tier_escaped}\\) │ {total} matches\n\n"
             )
         
         leaderboard_text += "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -10095,16 +10098,18 @@ async def handle_match_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if match_type == "team":
             # Team vs Team feature - Coming Soon
             await query.edit_message_text(
-                "🚧 *TEAM VS TEAM*\n"
-                "━━━━━━━━━━━━━━━━━━━━\n\n"
-                "⚠️ *Coming Soon\\!*\n\n"
-                "This feature is currently under development\\.\n"
-                "We're working hard to bring you:\n\n"
-                "• 🎲 Random Team Matches\n"
-                "• 👥 Manual Team Setup\n"
-                "• 📊 Team Statistics\n"
-                "• 🏆 Team Leaderboards\n\n"
-                "Stay tuned for updates\\!",
+                escape_markdown_v2_custom(
+                    "🚧 *TEAM VS TEAM*\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n\n"
+                    "⚠️ *Coming Soon!*\n\n"
+                    "This feature is currently under development.\n"
+                    "We're working hard to bring you:\n\n"
+                    "• 🎲 Random Team Matches\n"
+                    "• 👥 Manual Team Setup\n"
+                    "• 📊 Team Statistics\n"
+                    "• 🏆 Team Leaderboards\n\n"
+                    "Stay tuned for updates!"
+                ),
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("🔙 Back to Menu", callback_data=f"back_to_menu_{creator_id}")
                 ]]),
@@ -10136,27 +10141,23 @@ async def handle_match_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                 ])
             
-            # Build mode descriptions with proper escaping content only
+            # Build mode descriptions with proper escaping
             mode_descriptions = []
             for mode in GAME_MODES:
                 mode_info = GAME_MODES[mode]
-                # Escape the content variables
-                escaped_desc = [escape_markdown_v2_custom(line) for line in mode_info['description']]
-                desc_lines = "\n  ".join(escaped_desc)
-                # Icon and Title are safe/controlled, but title could technically have chars
-                # mode_info['icon'] is emoji (safe)
-                # mode_info['title'] is uppercase text (safe, but let's escape to be strict if it changes)
-                title = escape_markdown_v2_custom(mode_info['title'])
-                
+                # Don't double-escape if already escaped, just use the descriptions as-is
+                desc_lines = "\n  ".join(mode_info['description'])
+                title = mode_info['title']
                 mode_descriptions.append(f"*{mode_info['icon']} {title}*\n  {desc_lines}")
             
             modes_text = "\n\n".join(mode_descriptions)
             
             await query.edit_message_text(
-                f"🎮  *SELECT GAME MODE*\n"
-                f"══════════════════════\n\n"
-                f"{modes_text}\n\n"
-                f"👇 *Tap a mode to configure:*",
+                escape_markdown_v2_custom(
+                    f"🎮 SELECT GAME MODE\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                    f"{modes_text}"
+                ),
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode=ParseMode.MARKDOWN_V2
             )
@@ -10188,13 +10189,12 @@ async def handle_back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
             ]
         
         await query.edit_message_text(
-            "🏟️  *CRICKET SAGA ARENA*\n"
-            "══════════════════════\n\n"
-            "⚔️ *PLAYER VS PLAYER*\n"
-            "Challenge a friend to a 1v1 duel\\.\n\n"
-            "👥 *TEAM BATTLE*\n"
-            "Squad play\\. Captains lead the charge\\.\n\n"
-            "👇 *Choose match type:*",
+            escape_markdown_v2_custom(
+                "*🏏 SELECT MATCH TYPE*\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                "• *Player vs Player*: 1v1 Classic Match\n"
+                "• *Team vs Team*: Full Team Match"
+            ),
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode=ParseMode.MARKDOWN_V2
         )
