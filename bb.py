@@ -151,10 +151,9 @@ MESSAGE_STYLES = {
 GAME_MODES = {
     'classic': {
         'icon': "🏏",
-        'title': "CLASSIC MATCH",
+        'title': "CLASSIC",
         'description': [
-            "Traditional gameplay.",
-            "Set wickets (1-10) & play until all out."
+            "Set wickets & play till all out"
         ],
         'max_wickets': 10,
         'max_overs': 20,
@@ -164,8 +163,7 @@ GAME_MODES = {
         'icon': "⚡",
         'title': "QUICK BLITZ",
         'description': [
-            "Fast-paced action.",
-            "Set overs (1-50) with unlimited wickets."
+            "Set overs, unlimited wickets"
         ],
         'max_wickets': float('inf'),
         'max_overs': 5,
@@ -175,8 +173,7 @@ GAME_MODES = {
         'icon': "🎯",
         'title': "SURVIVAL",
         'description': [
-            "The ultimate test.",
-            "1 Wicket. Infinite Overs. High Score wins."
+            "1 Wicket \| Infinite Overs"
         ],
         'max_wickets': 1,
         'max_overs': float('inf'),
@@ -7586,7 +7583,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             "🏏 *CAREER TOTALS*\n"
             "────────────────\n"
-            f"🏃 *Runs:*    {total_runs}  |  *High:* {highest_score}\n"
+            f"🏃 *Runs:*    {total_runs}  \|  *High:* {highest_score}\n"
             f"💥 *Bound:*   {boundaries}/{sixes}\n"
             f"🎯 *Wickets:* {wickets}"
         )
@@ -8545,7 +8542,7 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             leaderboard_text += (
                 f"{medal} *\\#{idx}* {username_escaped}\n"
-                f"   ⚡ *{rating}* \\({rank_tier_escaped}\\) │ {total} matches\n\n"
+                f"   ⚡ *{rating}* \\({rank_tier_escaped}\\) \| {total} matches\n\n"
             )
         
         leaderboard_text += "━━━━━━━━━━━━━━━━━━━━━━\n"
