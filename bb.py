@@ -151,9 +151,10 @@ MESSAGE_STYLES = {
 GAME_MODES = {
     'classic': {
         'icon': "🏏",
-        'title': "Classic Cricket",
+        'title': "CLASSIC MATCH",
         'description': [
-            "⚖️ Limited Overs & Wickets",
+            "Traditional gameplay.",
+            "Set wickets (1-10) & play until all out."
         ],
         'max_wickets': 10,
         'max_overs': 20,
@@ -161,10 +162,10 @@ GAME_MODES = {
     },
     'quick': {
         'icon': "⚡",
-        'title': "Quick Match",
+        'title': "QUICK BLITZ",
         'description': [
-            "♾️ Unlimited Wickets",
-            "⏱️ Limited overs"
+            "Fast-paced action.",
+            "Set overs (1-50) with unlimited wickets."
         ],
         'max_wickets': float('inf'),
         'max_overs': 5,
@@ -172,11 +173,10 @@ GAME_MODES = {
     },
     'survival': {
         'icon': "🎯",
-        'title': "Survival Mode",
+        'title': "SURVIVAL",
         'description': [
-            "💀 One Wicket Challenge",
-            "♾️ Unlimited Overs",
-            "🔥 Last Man Standing"
+            "The ultimate test.",
+            "1 Wicket. Infinite Overs. High Score wins."
         ],
         'max_wickets': 1,
         'max_overs': float('inf'),
@@ -2504,13 +2504,13 @@ async def gameon(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
 
         await update.message.reply_text(
-            "🎮  *CRICKET SAGA ARÉNA*  🎮\n"
-            "═══════════════════════\n"
-            "✨ *NEW MATCH SETUP*\n\n"
-            "🔥 *Choose Your Challenge:*\n"
-            "⚔️ *1v1 Duel* • Battle a friend\n"
-            "👥 *Team Battle* • Squad vs Squad\n\n"
-            "👇 *Select Mode Below:*",
+            "🏟️  *CRICKET SAGA ARENA*\n"
+            "══════════════════════\n\n"
+            "⚔️ *PLAYER VS PLAYER*\n"
+            "Challenge a friend to a 1v1 duel.\n\n"
+            "👥 *TEAM BATTLE*\n"
+            "Squad play. Captains lead the charge.\n\n"
+            "👇 *Choose match type:*",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode=ParseMode.MARKDOWN_V2
         )
@@ -3047,13 +3047,35 @@ async def handle_bat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Use random batting message with player name
         batting_msg = random.choice(ACTION_MESSAGES['batting']).format(game['batsman_name'])
+        
+        # Visual Over (last 6 balls max)
+        visual_over = " ".join([{'0': '0️⃣', '1': '1️⃣', '2': '2️⃣', '3': '3️⃣', '4': '4️⃣', '6': '6️⃣', 'W': '🔴'}.get(str(b), str(b)) for b in game.get('this_over', [])])
+        if not visual_over: visual_over = "New Over"
+
+        # Stats Logic
+        if game['current_innings'] == 1:
+            # Projected Score
+            crr = safe_division(current_score, game['balls']/6, 0)
+            projected = int(crr * game['max_overs'])
+            stats_line = f"⚡ *Runs/Over:* {crr:.1f}  |  🔮 *Projected:* {projected}"
+        else:
+            # Chase Equation
+            needed = game['target'] - current_score
+            rem_balls = (game['max_overs'] * 6) - game['balls']
+            stats_line = f"🎯 *Target:* {game['target']}  |  *Need {needed} off {rem_balls}*"
+
         await safe_edit_message(
             query.message,
-            f"*🏏 Over* {game['balls']//6}.{game['balls']%6}\n"
-            f"{MATCH_SEPARATOR}\n"
-            f"*Score: *{current_score}/{game['wickets']}\n"
-            f"{batting_msg}\n\n"
-            f"🎯 {game['bowler_name']}'s turn to bowl!",
+            f"🏟️  *CRICKET SAGA LIVE*\n"
+            f"═══════════════════════════\n"
+            f"🔴 *{game['batsman_name']}* vs 🔵 *{game['bowler_name']}*\n\n"
+            f"          💥 *BATSMAN READY* 💥\n"
+            f"    \"{batting_msg}\"\n\n"
+            f"📊 *SCORE: {current_score}/{game['wickets']}*  ({game['balls']//6}.{game['balls']%6} Overs)\n"
+            f"{stats_line}\n\n"
+            f"This Over: {visual_over}\n"
+            f"═══════════════════════════\n"
+            f"👇 *Next Ball:* Select your shot...",
             keyboard=InlineKeyboardMarkup(keyboard)
         )
         
@@ -3205,23 +3227,36 @@ async def handle_bowl(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         keyboard = get_batting_keyboard(game_id)
         
+        if game['current_innings'] == 1:
+            # Projected Score
+            crr = safe_division(current_score, game['balls']/6, 0)
+            if game['balls'] > 0:
+                projected = int(crr * game['max_overs'])
+                stats_line = f"⚡ *Runs/Over:* {crr:.1f}  |  🔮 *Projected:* {projected}"
+            else:
+                stats_line = f"⚡ *Runs/Over:* 0.0  |  🔮 *Projected:* TBD"
+        else:
+            # Chase Equation
+            needed = game['target'] - current_score
+            rem_balls = (game['max_overs'] * 6) - game['balls']
+            stats_line = f"🎯 *Target:* {game['target']}  |  *Need {needed} off {rem_balls}*"
+
+        # Visual Over
+        visual_over = " ".join([{'0': '0️⃣', '1': '1️⃣', '2': '2️⃣', '3': '3️⃣', '4': '4️⃣', '6': '6️⃣', 'W': '🔴'}.get(str(b), str(b)) for b in game.get('this_over', [])])
+        if not visual_over: visual_over = "New Over"
+
         status_text = (
-            f"🏏 Over {game['balls']//6}.{game['balls']%6}\n"
-            f"{MATCH_SEPARATOR}\n"
-            f"*Score:* {current_score}/{game['wickets']}\n"
-            f"*Batsman played: *{runs} | *Bowler bowled: *{bowl_num}\n\n"
-            f"{commentary}\n"
-            f"{over_commentary}\n\n"
-            f"*This Over: {' '.join(game['this_over'])}*\n\n"
-            f"🎮 {game['batsman_name']}'s turn to bat!"
+            f"🏟️  *CRICKET SAGA LIVE*\n"
+            f"═══════════════════════════\n"
+            f"🔴 *{game['batsman_name']}* vs 🔵 *{game['bowler_name']}*\n\n"
+            f"          {combined_action}\n"
+            f"    \"{commentary}\"\n\n"
+            f"📊 *SCORE: {current_score}/{game['wickets']}*  ({game['balls']//6}.{game['balls']%6} Overs)\n"
+            f"{stats_line}\n\n"
+            f"This Over: {visual_over}\n"
+            f"═══════════════════════════\n"
+            f"👇 *Next Ball:* Select your shot..."
         )
-        
-        if game['current_innings'] == 2:
-            runs_needed = game['target'] - current_score
-            balls_left = (game['max_overs'] * 6) - game['balls']
-            if balls_left > 0:
-                required_rate = (runs_needed * 6) / balls_left
-                status_text += f"\nNeed {runs_needed} from {balls_left} balls (RRR: {required_rate:.2f})"
         
         await safe_edit_message(
             query.message,
@@ -10119,9 +10154,10 @@ async def handle_match_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             await query.edit_message_text(
                 escape_markdown_v2_custom(
-                    f"🎮 SELECT GAME MODE\n"
-                    f"━━━━━━━━━━━━━━━━━━━━\n"
-                    f"{modes_text}"
+                    f"🎮  *SELECT GAME MODE*\n"
+                    f"══════════════════════\n\n"
+                    f"{modes_text}\n\n"
+                    f"👇 *Tap a mode to configure:*"
                 ),
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode=ParseMode.MARKDOWN_V2
@@ -10155,10 +10191,13 @@ async def handle_back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         await query.edit_message_text(
             escape_markdown_v2_custom(
-                "*🏏 SELECT MATCH TYPE*\n"
-                "━━━━━━━━━━━━━━━━━━━━\n\n"
-                "• *Player vs Player*: 1v1 Classic Match\n"
-                "• *Team vs Team*: Full Team Match"
+                "🏟️  *CRICKET SAGA ARENA*\n"
+                "══════════════════════\n\n"
+                "⚔️ *PLAYER VS PLAYER*\n"
+                "Challenge a friend to a 1v1 duel.\n\n"
+                "👥 *TEAM BATTLE*\n"
+                "Squad play. Captains lead the charge.\n\n"
+                "👇 *Choose match type:*"
             ),
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode=ParseMode.MARKDOWN_V2
