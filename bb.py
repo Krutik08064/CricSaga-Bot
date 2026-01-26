@@ -396,7 +396,7 @@ def check_admin(user_id: str) -> bool:
 
 def escape_markdown_v2_custom(text: str) -> str:
     """Escape special characters for Markdown V2 format with custom handling"""
-    special_chars = ['_', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
     for char in special_chars:
         text = text.replace(char, f"\\{char}")
     return text
@@ -2507,9 +2507,9 @@ async def gameon(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🏟️  *CRICKET SAGA ARENA*\n"
             "══════════════════════\n\n"
             "⚔️ *PLAYER VS PLAYER*\n"
-            "Challenge a friend to a 1v1 duel.\n\n"
+            "Challenge a friend to a 1v1 duel\\.\n\n"
             "👥 *TEAM BATTLE*\n"
-            "Squad play. Captains lead the charge.\n\n"
+            "Squad play\\. Captains lead the charge\\.\n\n"
             "👇 *Choose match type:*",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode=ParseMode.MARKDOWN_V2
@@ -10098,18 +10098,16 @@ async def handle_match_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if match_type == "team":
             # Team vs Team feature - Coming Soon
             await query.edit_message_text(
-                escape_markdown_v2_custom(
-                    "🚧 *TEAM VS TEAM*\n"
-                    "━━━━━━━━━━━━━━━━━━━━\n\n"
-                    "⚠️ *Coming Soon!*\n\n"
-                    "This feature is currently under development.\n"
-                    "We're working hard to bring you:\n\n"
-                    "• 🎲 Random Team Matches\n"
-                    "• 👥 Manual Team Setup\n"
-                    "• 📊 Team Statistics\n"
-                    "• 🏆 Team Leaderboards\n\n"
-                    "Stay tuned for updates!"
-                ),
+                "🚧 *TEAM VS TEAM*\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                "⚠️ *Coming Soon\\!*\n\n"
+                "This feature is currently under development\\.\n"
+                "We're working hard to bring you:\n\n"
+                "• 🎲 Random Team Matches\n"
+                "• 👥 Manual Team Setup\n"
+                "• 📊 Team Statistics\n"
+                "• 🏆 Team Leaderboards\n\n"
+                "Stay tuned for updates\\!",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("🔙 Back to Menu", callback_data=f"back_to_menu_{creator_id}")
                 ]]),
@@ -10141,24 +10139,27 @@ async def handle_match_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                 ])
             
-            # Build mode descriptions with proper escaping
+            # Build mode descriptions with proper escaping content only
             mode_descriptions = []
             for mode in GAME_MODES:
                 mode_info = GAME_MODES[mode]
-                # Don't double-escape if already escaped, just use the descriptions as-is
-                desc_lines = "\n  ".join(mode_info['description'])
-                title = mode_info['title']
+                # Escape the content variables
+                escaped_desc = [escape_markdown_v2_custom(line) for line in mode_info['description']]
+                desc_lines = "\n  ".join(escaped_desc)
+                # Icon and Title are safe/controlled, but title could technically have chars
+                # mode_info['icon'] is emoji (safe)
+                # mode_info['title'] is uppercase text (safe, but let's escape to be strict if it changes)
+                title = escape_markdown_v2_custom(mode_info['title'])
+                
                 mode_descriptions.append(f"*{mode_info['icon']} {title}*\n  {desc_lines}")
             
             modes_text = "\n\n".join(mode_descriptions)
             
             await query.edit_message_text(
-                escape_markdown_v2_custom(
-                    f"🎮  *SELECT GAME MODE*\n"
-                    f"══════════════════════\n\n"
-                    f"{modes_text}\n\n"
-                    f"👇 *Tap a mode to configure:*"
-                ),
+                f"🎮  *SELECT GAME MODE*\n"
+                f"══════════════════════\n\n"
+                f"{modes_text}\n\n"
+                f"👇 *Tap a mode to configure:*",
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode=ParseMode.MARKDOWN_V2
             )
@@ -10190,15 +10191,13 @@ async def handle_back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
             ]
         
         await query.edit_message_text(
-            escape_markdown_v2_custom(
-                "🏟️  *CRICKET SAGA ARENA*\n"
-                "══════════════════════\n\n"
-                "⚔️ *PLAYER VS PLAYER*\n"
-                "Challenge a friend to a 1v1 duel.\n\n"
-                "👥 *TEAM BATTLE*\n"
-                "Squad play. Captains lead the charge.\n\n"
-                "👇 *Choose match type:*"
-            ),
+            "🏟️  *CRICKET SAGA ARENA*\n"
+            "══════════════════════\n\n"
+            "⚔️ *PLAYER VS PLAYER*\n"
+            "Challenge a friend to a 1v1 duel\\.\n\n"
+            "👥 *TEAM BATTLE*\n"
+            "Squad play\\. Captains lead the charge\\.\n\n"
+            "👇 *Choose match type:*",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode=ParseMode.MARKDOWN_V2
         )
