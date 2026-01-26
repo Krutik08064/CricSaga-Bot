@@ -2504,11 +2504,13 @@ async def gameon(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
 
         await update.message.reply_text(
-            "🏏 *START A MATCH*\n"
-            "━━━━━━━━━━━━━━━━\n\n"
-            "Choose how you want to play:\n\n"
-            "• 1v1 – Competitive match\n"
-            "• Team – Play with multiple players",
+            "🎮  *CRICKET SAGA ARÉNA*  🎮\n"
+            "═══════════════════════\n"
+            "✨ *NEW MATCH SETUP*\n\n"
+            "🔥 *Choose Your Challenge:*\n"
+            "⚔️ *1v1 Duel* • Battle a friend\n"
+            "👥 *Team Battle* • Squad vs Squad\n\n"
+            "👇 *Select Mode Below:*",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode=ParseMode.MARKDOWN_V2
         )
@@ -2925,15 +2927,13 @@ async def handle_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
         joiner_mention = f"[{joiner_name_escaped}](tg://user?id={game['joiner']})"
         
         message_text = (
-            f"🏏 *MATCH STARTING*\n"
-            f"━━━━━━━━━━━━━━━━\n"
-            f"*Mode:* {escape_markdown_v2_custom(game['mode'].title())}\n"
-            f"*Wickets:* {str(game['max_wickets']) if game['max_wickets'] != float('inf') else INFINITY_SYMBOL}\n"
-            f"*Overs:* {game['max_overs']}\n\n"
-            f"*Players:*\n"
-            f"• {creator_mention}\n"
-            f"• {joiner_mention}\n\n"
-            f"🎲 {joiner_mention}, choose ODD or EVEN\\!"
+            f"⚔️ *MATCH LOCKED \\!* ⚔️\n"
+            f"═══════════════════════\n\n"
+            f"🔴 *{creator_mention}*  *VS*  🔵 *{joiner_mention}*\n\n"
+            f"📍 *Mode:* {escape_markdown_v2_custom(game['mode'].title())}\n"
+            f"🎯 *Overs:* {game['max_overs']}  |  🏏 *Wickets:* {str(game['max_wickets']) if game['max_wickets'] != float('inf') else INFINITY_SYMBOL}\n\n"
+            f"🎲 *TOSS TIME\\!*\n"
+            f"👉 {joiner_mention}, call *ODD* or *EVEN*\\!"
         )
         
         await query.edit_message_text(
@@ -3277,18 +3277,20 @@ async def handle_innings_change(msg, game: dict, game_id: str):
     elif game['balls'] >= game['max_overs'] * 6:
         batsman_out_text = f"🏏 Innings ended\\. *{batsman_name_escaped}* finished not out\\.\n\n"
 
-    # Add 1st innings batsman name line (always shown)
+    # Add 1st innings batsman name line
     batsman_line = f"👤 *Batsman:* {batsman_name_escaped}\n"
 
     await safe_edit_message(msg,
-        f"🏁 *INNINGS COMPLETE*\n"
-        f"━━━━━━━━━━━━━━━━\n\n"
-        f"{batsman_line}"
+        f"🏁 *1st INNINGS SUMMARY*\n"
+        f"═══════════════════════\n\n"
+        f"🏏 *Batting Star:* {batsman_name_escaped}\n"
+        f"📊 *Score:* {score_str}  in  {overs_escaped} overs\n"
+        f"🎯 *Target Set:* {target_escaped}\n"
+        f"📈 *Required Rate:* {required_rate_escaped} RPO\n"
+        f"═══════════════════════\n\n"
         f"{batsman_out_text}"
-        f"• *Score:* {score_str} \\({overs_escaped}\\)\n"
-        f"• *Target:* {target_escaped} runs\n"
-        f"• *Required Rate:* {required_rate_escaped}\n\n"
-        f"🎮 *{batsman_next_escaped}'s turn to bat\\!*",
+        f"🔥 *CHASE ON\\!* \n"
+        f"🎮 *{batsman_next_escaped}*, you're up\\!",
         keyboard=InlineKeyboardMarkup(get_batting_keyboard(game_id)))
 
 # Update handle_game_end to format match summary properly
@@ -3678,18 +3680,16 @@ async def handle_game_end(query, game: dict, current_score: int, is_chase_succes
         
         # New format with strike rates
         final_message = (
-            f"🏆 *MATCH RESULT*\n"
-            f"━━━━━━━━━━━━━━━━\n"
-            f"{game['mode'].title()} Mode • #{match_id}\n"
-            f"📅 {date}\n\n"
-            f"📊 *SCORE SUMMARY*\n"
-            f"• {first_batsman} — {game['first_innings_score']}/{game['first_innings_wickets']} ({first_innings_overs} ov)\n"
-            f"  4s: {game.get('first_innings_boundaries', 0)} | 6s: {game.get('first_innings_sixes', 0)} | SR: {first_sr}\n\n"
-            f"• {second_batsman} — {current_score}/{game['wickets']} ({second_innings_overs} ov)\n"
-            f"  4s: {game.get('second_innings_boundaries', 0)} | 6s: {game.get('second_innings_sixes', 0)} | SR: {second_sr}\n"
-            f"━━━━━━━━━━━━━━━━\n"
-            f"🏆 *{winner}*\n"
-            f"{result_text} 🎉"
+            f"🏆  *MATCH RESULT*\n"
+            f"════════════════\n\n"
+            f"🔴 *{first_batsman}* vs 🔵 *{second_batsman}*\n\n"
+            f"📊 *SCORECARD*\n"
+            f"• *{first_batsman}*: {game['first_innings_score']}/{game['first_innings_wickets']} \\({first_innings_overs}\\)\n"
+            f"  SR: {first_sr} \\| 6s: {game.get('first_innings_sixes', 0)}\n\n"
+            f"• *{second_batsman}*: {current_score}/{game['wickets']} \\({second_innings_overs}\\)\n"
+            f"  SR: {second_sr} \\| 6s: {game.get('second_innings_sixes', 0)}\n\n"
+            f"🎉 *WINNER: {escape_markdown_v2_custom(winner)}*\n"
+            f"{result_text} \\! 🎊"
         )
 
         # Send message with proper escaping
@@ -5157,19 +5157,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             REGISTERED_USERS.add(str(user.id))
             
             welcome_message = (
-                f"🏏 *WELCOME TO CRICKET SAGA* 🏏\n"
-                f"{MATCH_SEPARATOR}\n\n"
-                f"✨ Hey {escape_markdown_v2_custom(user.first_name)}\\!\n\n"
-                f"*Cricket Saga* is an interactive multiplayer cricket game for Telegram\\.\n"
-                f"Play quick matches, compete in ranked games, and track your stats all inside your chats\\.\n\n"
-                f"🎮 *WHAT YOU CAN DO:*\n"
-                f"• Play 1v1 or team matches\n"
-                f"• Compete in ranked mode\n"
-                f"• Track your career \\& rankings\n\n"
-                f"🚀 *GET STARTED:*\n"
-                f"• Use /gameon in a group to start a match\n"
-                f"• Use /help to see all commands\n\n"
-                f"Ready to play? Add me to a group and type /gameon\\!"
+                f"🎮  *CRICKET SAGA*  🎮\n"
+                f"═══════════════════\n\n"
+                f"👋 *Welcome, {escape_markdown_v2_custom(user.first_name)}\\!*\n\n"
+                f"Ready to step onto the pitch\\?\n\n"
+                f"🏏 *Quick Match*  •  Practice your shots\n"
+                f"🏆 *Ranked*       •  Climb the ladder\n"
+                f"📊 *Career*       •  Track your stats\n\n"
+                f"👇 *Get Started:*\n"
+                f"/gameon \\- Start a Match\n"
+                f"/help   \\- View Commands"
             )
 
             
@@ -5209,35 +5206,18 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     help_text = (
-        "🏏 *CRICSAGA COMMANDS*\n"
-        "━━━━━━━━━━━━━━━━\n\n"
-        "🎮 *GETTING STARTED*\n"
-        "• /start \\- Register your account\n"
-        "• /help \\- Show this help message\n\n"
-        "⚡ *PLAY MATCHES*\n"
-        "• /gameon \\- Start practice match\n"
-        "• /ranked \\- Join ranked queue\n"
-        "• /challenge \\- Challenge a player\n"
-        "  \\(Reply to their message\\)\n"
-        "• /cancel\\_queue \\- Leave ranked queue\n\n"
-        "👤 *YOUR PROFILE*\n"
-        "• /profile \\- View your stats\n"
-        "• /career \\- Check rating & rank\n"
-        "• /scorecard \\- Match history\n\n"
-        "🏆 *RANKINGS*\n"
-        "• /leaderboard \\- Top players\n"
-        "• /ranks \\- All rank tiers info\n"
-        "• /rankedinfo \\- Ranking guide\n\n"
-        "📜 *MATCH HISTORY*\n"
-        "• /save \\- Save current match\n"
-        "  \\(Reply to match result\\)\n"
-        "• /scorecard \\- View saved matches\n\n"
-        "💡 *TIPS*\n"
-        "• Practice with /gameon first\n"
-        "• Ranked matches affect rating\n"
-        "• Start at 1000 rating\n"
-        "• Climb from Bronze to Legend\\!\n\n"
-        "_For detailed rank info, use /rankedinfo_"
+        "📚  *COMMAND CENTER*\n"
+        "══════════════════\n\n"
+        "🎮 *MATCHES*\n"
+        "• /gameon   \\- Start Match / Practice\n"
+        "• /ranked   \\- Join Ranked Queue\n"
+        "• /challenge \\- Challenge Player\n\n"
+        "👤 *PROFILE*\n"
+        "• /profile  \\- Your Stats\n"
+        "• /career   \\- Rank & Rating\n\n"
+        "🏆 *LEADERBOARDS*\n"
+        "• /leaderboard \\- Top Players\n"
+        "• /ranks       \\- Tier Info"
     )
     
     await update.message.reply_text(
@@ -7557,41 +7537,23 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Calculate normal mode stats (total - ranked)
         normal_matches = player_stats.get('matches_played', 0) - total_matches
         normal_runs = total_runs  # Approximate, we'll track this better in future
-
         profile_text = (
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"👤 *PLAYER PROFILE*\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🏏 *{escape_markdown_v2_custom(user_name)}*\n\n"
+            "👤  *PLAYER CARD*\n"
+            "════════════════\n"
+            f"✨ *{escape_markdown_v2_custom(user_name)}*\n\n"
             
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "🏆 *RANKED MODE*\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"⚡ Rating: *{rating}*\n"
-            f"🎖️ Rank: {escape_markdown_v2_custom(rank_tier)}\n"
-            f"🎮 Matches: {total_matches}\n"
-            f"✅ Wins: {wins} │ ❌ Losses: {losses}\n"
-            f"📊 Win Rate: {escape_markdown_v2_custom(f'{win_rate:.0f}%')}\n\n"
+            "🏆 *RANKED STATS*\n"
+            "────────────────\n"
+            f"🎖️ *Tier:*   {escape_markdown_v2_custom(rank_tier)}\n"
+            f"⚡ *Rating:* {rating}\n"
+            f"🎮 *Matches:* {total_matches}\n"
+            f"📈 *Win Rate:* {escape_markdown_v2_custom(f'{win_rate:.0f}%')}\n\n"
             
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "🎯 *NORMAL MODE*\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🎮 Matches: {normal_matches}\n\n"
-            
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "🏏 *BATTING STATS*\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📈 Total Runs: *{total_runs}*\n"
-            f"📊 Average: {escape_markdown_v2_custom(f'{batting_avg:.1f}')}\n"
-            f"🎯 High Score: *{highest_score}*\n"
-            f"💥 Boundaries: {boundaries} 4s │ {sixes} 6s\n\n"
-            
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "⚾ *BOWLING STATS*\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🎯 Wickets: *{wickets}*\n"
-            f"🔒 Dot Balls: {dot_balls}\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🏏 *CAREER TOTALS*\n"
+            "────────────────\n"
+            f"🏃 *Runs:*    {total_runs}  |  *High:* {highest_score}\n"
+            f"💥 *Bound:*   {boundaries}/{sixes}\n"
+            f"🎯 *Wickets:* {wickets}"
         )
 
         # Enhanced interactive buttons
@@ -8529,10 +8491,8 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Build leaderboard message with improved UI
         leaderboard_text = (
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "🏆 *GLOBAL LEADERBOARD* 🏆\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "👑 *Top Players*\n\n"
+            "🏆  *HALL OF FAME*\n"
+            "════════════════\n\n"
         )
         
         medal_emojis = ["🥇", "🥈", "🥉"]
@@ -8546,26 +8506,11 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # Escape username and rank
             username_escaped = escape_markdown_v2_custom(username)
-            rank_escaped = escape_markdown_v2_custom(rank_tier)
-            
-            # Create star rating visual based on rating
-            if rating >= 2000:
-                stars = "⭐⭐⭐⭐⭐"
-            elif rating >= 1800:
-                stars = "⭐⭐⭐⭐"
-            elif rating >= 1600:
-                stars = "⭐⭐⭐"
-            elif rating >= 1400:
-                stars = "⭐⭐"
-            elif rating >= 1200:
-                stars = "⭐"
-            else:
-                stars = "🔸"
+            rank_tier_escaped = escape_markdown_v2_custom(rank_tier)
             
             leaderboard_text += (
                 f"{medal} *\\#{idx}* {username_escaped}\n"
-                f"   🎯 *{rating}* {stars}\n"
-                f"   {rank_escaped} │ {total} matches\n\n"
+                f"   ⚡ *{rating}* \\({rank_tier_escaped}\\) │ {total} matches\n\n"
             )
         
         leaderboard_text += "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -8828,12 +8773,12 @@ async def ranked(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Send initial searching message
         search_message = await update.message.reply_text(
-            f"⚔️ *RANKED MATCHMAKING*\n"
-            f"━━━━━━━━━━━━━━━━\n\n"
-            f"Your Rating: {rating} \\({escape_markdown_v2_custom(rank_tier)}\\)\n"
-            f"Searching for opponents…\n\n"
-            f"• Range: {rating - RANKED_RATING_RANGE} – {rating + RANKED_RATING_RANGE}\n"
-            f"• Time: 0s elapsed",
+            f"🔍  *SEARCHING FOR OPPONENT\\.\\.\\.* \n"
+            f"════════════════════════\n\n"
+            f"👤 *Player:* {escape_markdown_v2_custom(username)}\n"
+            f"🎖️ *Rating:* {rating} \\({escape_markdown_v2_custom(rank_tier)}\\)\n"
+            f"⏱️ *Time:* 0s\n"
+            f"📡 *Range:* ±{RANKED_RATING_RANGE}",
             parse_mode=ParseMode.MARKDOWN_V2
         )
         
@@ -8856,11 +8801,11 @@ async def ranked(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if opponent:
             # Match found immediately!
             await search_message.edit_text(
-                f"✅ *Match Found\\!*\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"⚔️ Opponent: {escape_markdown_v2_custom(opponent['username'])}\n"
-                f"📊 Their Rating: {opponent['rating']} \\({escape_markdown_v2_custom(opponent['rank_tier'])}\\)\n"
-                f"🏆 Your Rating: {rating} \\({escape_markdown_v2_custom(rank_tier)}\\)\n\n"
+                f"✅  *MATCH FOUND\\!*\n"
+                f"════════════════\n"
+                f"⚔️ *Opponent:* {escape_markdown_v2_custom(opponent['username'])}\n"
+                f"📊 *Rating:* {opponent['rating']} \\({escape_markdown_v2_custom(opponent['rank_tier'])}\\)\n\n"
+                f"🏆 *Your Rating:* {rating} \\({escape_markdown_v2_custom(rank_tier)}\\)\n\n"
                 f"_Starting game in 3 seconds\\.\\.\\._",
                 parse_mode=ParseMode.MARKDOWN_V2
             )
@@ -8869,11 +8814,11 @@ async def ranked(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if opponent.get('message'):
                 try:
                     await opponent['message'].edit_text(
-                        f"✅ *Match Found\\!*\n"
-                        f"━━━━━━━━━━━━━━\n"
-                        f"⚔️ Opponent: {escape_markdown_v2_custom(username)}\n"
-                        f"📊 Their Rating: {rating} \\({escape_markdown_v2_custom(rank_tier)}\\)\n"
-                        f"🏆 Your Rating: {opponent['rating']} \\({escape_markdown_v2_custom(opponent['rank_tier'])}\\)\n\n"
+                        f"✅  *MATCH FOUND\\!*\n"
+                        f"════════════════\n"
+                        f"⚔️ *Opponent:* {escape_markdown_v2_custom(username)}\n"
+                        f"📊 *Rating:* {rating} \\({escape_markdown_v2_custom(rank_tier)}\\)\n\n"
+                        f"🏆 *Your Rating:* {opponent['rating']} \\({escape_markdown_v2_custom(opponent['rank_tier'])}\\)\n\n"
                         f"_Starting game in 3 seconds\\.\\.\\._",
                         parse_mode=ParseMode.MARKDOWN_V2
                     )
@@ -9392,19 +9337,14 @@ async def challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         # Send challenge notification in group
+        # Send challenge notification in group
         challenge_text = (
-            f"⚔️ <b>CHALLENGE RECEIVED</b>\n"
-            f"━━━━━━━━━━━━━━\n\n"
-            f"<b>👤 CHALLENGER</b>\n"
-            f"<a href='tg://user?id={user_id}'>{username}</a>\n"
-            f"Rating: {challenger_stats['rating']} ({challenger_rank})\n\n"
-            f"<b>🎯 TARGET</b>\n"
-            f"<a href='tg://user?id={target_id}'>{target_name}</a>\n"
-            f"Rating: {target_stats['rating']} ({target_rank})\n\n"
-            f"<b>🏏 MATCH FORMAT</b>\n"
-            f"Mode: Blitz (3 overs, 3 wickets)\n"
-            f"Type: Ranked (Rated Match)\n\n"
-            f"<i>⏳ <a href='tg://user?id={target_id}'>{target_name}</a>, you have 60 seconds to respond...</i>"
+            f"⚔️ <b>RANKED CHALLENGE</b>\n"
+            f"════════════════════\n\n"
+            f"🔴 <a href='tg://user?id={user_id}'>{html_escape(username)}</a> <b>VS</b> 🔵 <a href='tg://user?id={target_id}'>{html_escape(target_name)}</a>\n\n"
+            f"⚠️ <b>RANKED MATCH ALERT</b>\n"
+            f"Risk: Rating updates enabled\n\n"
+            f"👇 <i><a href='tg://user?id={target_id}'>{html_escape(target_name)}</a>, do you accept?</i>"
         )
         
         try:
